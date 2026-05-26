@@ -5,6 +5,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
+    TimestampType,
 )
 
 HISTOGRAM_FACT_SCHEMA = StructType(
@@ -44,6 +45,23 @@ EVENT_INSTANCE_FACT_SCHEMA = StructType(
         StructField("event_id", IntegerType(), False),
         StructField("start_ts", LongType(), False),
         StructField("end_ts", LongType(), False),
+    ]
+)
+
+# Named, versioned collections of event windows on top of event_instance_fact.
+# Each playlist version pins the windows that produced it, a creation timestamp,
+# and a stable event_id so re-runs produce identical references. Used for training
+# inputs, regulatory evidence, and shared scenario libraries.
+PLAYLIST_ITEMS_SCHEMA = StructType(
+    [
+        StructField("container_id", LongType(), False),
+        StructField("event_id", StringType(), False),
+        StructField("event_name", StringType(), True),
+        StructField("start_ts", LongType(), False),
+        StructField("end_ts", LongType(), False),
+        StructField("playlist_id", StringType(), False),
+        StructField("playlist_version", IntegerType(), False),
+        StructField("created_at", TimestampType(), True),
     ]
 )
 
