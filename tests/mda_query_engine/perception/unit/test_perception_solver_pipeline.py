@@ -106,6 +106,81 @@ class TestPerceptionPredicateOnlyComposition:
         # share.  Both happen to share 200.
         assert len(intersection) >= 0  # cogroup-level mixing exists in reality
 
+class TestMultiObjectCompoundPredicate:
+    """``detection_class("A") & detection_class("B")`` finds frames where
+    both object classes are present simultaneously — each selector scans all
+    rows independently and returns intervals that are then intersected, the
+    same way two scalar channels work.
+    """
+
+    def _cache_with_two_classes(self):
+        channels_pdf = pd.DataFrame(
+            {
+                "container_id": pd.Series([], dtype="int64"),
+                "channel_id": pd.Series([], dtype="int64"),
+                "tstart": pd.Series([], dtype="float64"),
+                "tend": pd.Series([], dtype="float64"),
+                "value": pd.Series([], dtype="float64"),
+            }
+        )
+        col_map = {"cid": "container_id", "ch": "channel_id",
+                   "ts": "tstart", "te": "tend", "val": "value"}
+        # Cyclist at frames 100, 200, 300; pedestrian at frames 200, 300, 400.
+        # Overlap window: 200–300.
+        otp = pd.DataFrame([
+            {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "detection_class": "cyclist"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "detection_class": "cyclist"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 300.0, "detection_class": "cyclist"},
+            {"container_id": 1, "object_id": 20, "frame_ts": 200.0, "detection_class": "pedestrian"},
+            {"container_id": 1, "object_id": 20, "frame_ts": 300.0, "detection_class": "pedestrian"},
+            {"container_id": 1, "object_id": 20, "frame_ts": 400.0, "detection_class": "pedestrian"},
+        ])
+        return PerceptionCache(channels_pdf=channels_pdf, col_map=col_map, object_tracks_pdf=otp)
+
+    def test_compound_finds_cooccurrence_window(self):
+        ot = ObjectTrackAccessor()
+        cache = self._cache_with_two_classes()
+        compound = (
+            ot.detection_class("cyclist") & ot.detection_class("pedestrian")
+        ).alias("co")
+        result = compound.build(cache)
+        assert isinstance(result, Intervals)
+        assert len(result) >= 1
+        assert result.start_time() == 200.0
+
+    def test_single_class_does_not_match_other(self):
+        ot = ObjectTrackAccessor()
+        cache = self._cache_with_two_classes()
+        cyclist_only = ot.detection_class("cyclist").alias("c").build(cache)
+        pedestrian_only = ot.detection_class("pedestrian").alias("p").build(cache)
+        # Cyclist frames start at 100; pedestrian at 200.
+        assert cyclist_only.start_time() == 100.0
+        assert pedestrian_only.start_time() == 200.0
+
+    def test_no_cooccurrence_returns_empty(self):
+        ot = ObjectTrackAccessor()
+        channels_pdf = pd.DataFrame(
+            {"container_id": pd.Series([], dtype="int64"),
+             "channel_id": pd.Series([], dtype="int64"),
+             "tstart": pd.Series([], dtype="float64"),
+             "tend": pd.Series([], dtype="float64"),
+             "value": pd.Series([], dtype="float64")}
+        )
+        col_map = {"cid": "container_id", "ch": "channel_id",
+                   "ts": "tstart", "te": "tend", "val": "value"}
+        # Cyclist at frame 100 only; pedestrian at frame 400 only — no overlap.
+        otp = pd.DataFrame([
+            {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "detection_class": "cyclist"},
+            {"container_id": 1, "object_id": 20, "frame_ts": 400.0, "detection_class": "pedestrian"},
+        ])
+        cache = PerceptionCache(channels_pdf=channels_pdf, col_map=col_map, object_tracks_pdf=otp)
+        compound = (
+            ot.detection_class("cyclist") & ot.detection_class("pedestrian")
+        ).alias("co")
+        result = compound.build(cache)
+        assert len(result) == 0
+
+
 class TestPerceptionEventBuildsExpression:
     def test_perception_event_wraps_compound_predicate(self):
         ot = ObjectTrackAccessor()

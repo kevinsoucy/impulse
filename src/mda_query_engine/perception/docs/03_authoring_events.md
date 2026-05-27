@@ -166,23 +166,31 @@ report.add_event(cut_in)
 
 ## Compound predicates
 
-Two patterns that a single `PerceptionEvent` cannot express today:
+### Two different object classes in the same frame
 
-- **Two different object classes in the same frame.** "A cyclist and a
-  pedestrian both visible on the left at the same time." Each `PerceptionEvent`
-  predicate is evaluated across all rows — `detection_class("cyclist") &
-  detection_class("pedestrian")` on the same expression would require both
-  conditions to hold on the *same row*, which is never true. Run two separate
-  events and overlap-join the results post-solve.
+`object_id` plays the same role as `channel_id` for scalar channels. Each
+`PerceptionSelector` evaluates independently across all rows in
+`object_tracks`, produces frame-level intervals (merged across all matching
+objects), and `&` intersects those interval sets. The result is frames where
+both conditions hold simultaneously — with no requirement that they hold on the
+same row.
 
-- **A perception condition combined inline with a scalar-channel condition.**
-  "A cyclist on the left while vehicle speed exceeds 30 kph." A
-  `PerceptionEvent` expression cannot reference `BasicEvent` scalar channels
-  directly. The supported pattern is `SequenceOfEvents` with `max_step_duration_ms=0`
-  for simultaneous conditions, or a post-solve join on `event_instance_fact`.
+```python
+cyclist_and_pedestrian = PerceptionEvent(
+    name="cyclist_and_pedestrian_left",
+    expr=(ot.detection_class("cyclist") & ot.azimuth("front_left"))
+         & (ot.detection_class("pedestrian") & ot.azimuth("front_left")),
+    desc="A cyclist and a pedestrian both visible on the left at the same time",
+)
+report.add_event(cyclist_and_pedestrian)
+```
 
-Both are known limitations of the current architecture. Inline multi-predicate
-support is tracked in the backlog.
+### Perception condition combined with a scalar-channel condition
+
+Inline combination of a `PerceptionSelector` and a scalar channel expression
+is not yet a validated pattern. Use `SequenceOfEvents` with
+`max_step_duration_ms=0` to express simultaneous conditions across the two
+surfaces, or post-join on `event_instance_fact`.
 
 ## Temporal sequences
 
