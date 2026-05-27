@@ -40,8 +40,8 @@ from pyspark.sql import Row
 
 from lib.adapter import resolve
 from lib.byod_config import BYODConfig
-from lakevision import ObjectTracksConfig, derive_channel_metrics_from_channels
-from lakevision.schema import (
+from mda_query_engine.perception import ObjectTracksConfig, derive_channel_metrics_from_channels
+from mda_query_engine.perception.schema import (
     OBJECT_TRACKS,
     PERCEPTION_CHANNELS,
 )
@@ -100,7 +100,7 @@ for v in cfg.volumes_to_create():
 
 # COMMAND ----------
 
-# MAGIC %md ### Empty LakeVision tables (from `lakevision.schema`)
+# MAGIC %md ### Empty LakeVision tables (from `mda_query_engine.perception.schema`)
 
 # COMMAND ----------
 

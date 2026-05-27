@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from lakevision.geometry import (
+from mda_query_engine.perception.geometry import (
     ego_yaw_from_global_yaw as _ego_yaw_from_global_yaw,
     yaw_from_quat,
 )

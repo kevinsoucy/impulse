@@ -34,8 +34,8 @@ from collections import defaultdict
 
 from lib.adapter import resolve
 from lib.byod_config import BYODConfig
-from lakevision.openlabel import build_openlabel_for_event, serialize
-from lakevision.schema import CAMERA_OBJECT_DETECTIONS, LIDAR_OBJECT_DETECTIONS
+from mda_query_engine.perception.openlabel import build_openlabel_for_event, serialize
+from mda_query_engine.perception.schema import CAMERA_OBJECT_DETECTIONS, LIDAR_OBJECT_DETECTIONS
 
 # COMMAND ----------
 
@@ -377,7 +377,7 @@ for pi_row in playlist:
         playlist_id=_playlist_id,
         playlist_version=version,
         annotator=ol_meta.get("annotator", "ground_truth"),
-        exporter=ol_meta.get("exporter", "lakevision/openlabel.py"),
+        exporter=ol_meta.get("exporter", "mda_query_engine/perception/openlabel.py"),
         stream_description_prefix=ol_meta.get("stream_description_prefix", ""),
     )
 

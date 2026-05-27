@@ -311,7 +311,7 @@ class A2D2Loader:
             return json.load(f)
 
     def camera_calib_for_sample(self, sample: Sample) -> dict[str, dict]:
-        """Per-camera calibration dict shaped for `lakevision`-side projection.
+        """Per-camera calibration dict shaped for `mda_query_engine.perception`-side projection.
 
         Returns the same keys as the NuScenes adapter's `camera_calib_for_sample`:
           intrinsic, sensor_rotation, sensor_translation, ego_rotation,

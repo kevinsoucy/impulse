@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from lakevision.geometry import rotation_matrix_from_quat as _rotation_matrix_from_quat
+from mda_query_engine.perception.geometry import rotation_matrix_from_quat as _rotation_matrix_from_quat
 
 from .loader import Annotation, PandaSetLoader, Scene
 

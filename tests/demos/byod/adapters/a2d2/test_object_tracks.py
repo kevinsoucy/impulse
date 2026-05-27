@@ -62,7 +62,7 @@ class TestA2D2Source:
         assert A2D2_SOURCE == "ground_truth_camera_lidar"
 
 
-# ── Geometry helpers re-exported from lakevision.geometry ────────────────────
+# ── Geometry helpers re-exported from mda_query_engine.perception.geometry ────────────────────
 
 
 class TestGeometryReexports:

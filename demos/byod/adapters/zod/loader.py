@@ -380,7 +380,7 @@ class ZodLoader:
             return {}
 
     def camera_calib_for_sample(self, sample: Sample) -> dict[str, dict]:
-        """Camera calibration dict shaped for `lakevision`-side projection.
+        """Camera calibration dict shaped for `mda_query_engine.perception`-side projection.
 
         Returns the same keys as the A2D2 adapter so `camera.py` can stay
         nearly identical: intrinsic, sensor_rotation, sensor_translation,

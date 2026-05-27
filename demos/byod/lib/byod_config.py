@@ -202,7 +202,7 @@ class BYODConfig:
         """Defaults for OpenLABEL export when adapter does not override."""
         return self.adapter_settings.get("openlabel", {
             "annotator": "ground_truth",
-            "exporter": "lakevision/openlabel.py",
+            "exporter": "mda_query_engine/perception/openlabel.py",
             "stream_description_prefix": "",
         })
 

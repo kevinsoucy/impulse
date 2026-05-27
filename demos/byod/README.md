@@ -21,7 +21,7 @@ The reference demo for **how to add a new dataset to LakeVision**. Every dataset
 | **`lib/visualization.py`** | Camera / LiDAR readers + channel-resolution helpers | Don't edit |
 | **`lib/sensor_kpi.py`** | KPI helpers used by `04_visualize.py` | Don't edit |
 | **Generic notebooks** (`01`–`04`) | Provisioning, ingest, TSAL, OpenLABEL, KPI, visualize | Don't edit |
-| **Core helpers** (`src/lakevision/`) | `geometry`, `windowing`, `openlabel`, `scalar_metrics`, `playlists`, schemas | Don't edit |
+| **Core helpers** (`src/mda_query_engine/perception/`) | `geometry`, `windowing`, `openlabel`, `scalar_metrics`, `playlists`, schemas | Don't edit |
 
 ### Adapter Protocol contract
 

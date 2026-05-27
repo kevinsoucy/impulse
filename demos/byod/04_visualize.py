@@ -50,8 +50,8 @@ from lib.visualization import (
     resolve_front_camera_channel_id,
     resolve_lidar_channel_id,
 )
-from lakevision import frame_nearest_to
-from lakevision.geometry import azimuth_label_to_xy
+from mda_query_engine.perception import frame_nearest_to
+from mda_query_engine.perception.geometry import azimuth_label_to_xy
 from pyspark.sql import functions as F
 
 # COMMAND ----------

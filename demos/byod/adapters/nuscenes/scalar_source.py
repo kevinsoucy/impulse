@@ -22,11 +22,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lakevision.geometry import (
+from mda_query_engine.perception.geometry import (
     rotation_matrix_from_quat as _rotation_matrix_from_quat,
     yaw_from_quat,
 )
-from lakevision.geometry import global_to_ego as _global_to_ego_core
+from mda_query_engine.perception.geometry import global_to_ego as _global_to_ego_core
 
 from .loader import (
     DERIVED_CHANNEL_IDS,
@@ -39,7 +39,7 @@ from .loader import (
 
 
 def global_to_ego(point_global: np.ndarray, ego: EgoPose) -> np.ndarray:
-    """NuScenes-shaped wrapper around `lakevision.geometry.global_to_ego`.
+    """NuScenes-shaped wrapper around `mda_query_engine.perception.geometry.global_to_ego`.
 
     Accepts an `EgoPose` so existing call sites don't have to unpack translation
     and rotation. The core function takes them separately so it has no

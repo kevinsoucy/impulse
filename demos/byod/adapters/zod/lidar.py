@@ -9,7 +9,7 @@ Per ADR-7, this table is populated only inside TSAL event windows.
 
 from __future__ import annotations
 
-from lakevision.geometry import yaw_from_quat
+from mda_query_engine.perception.geometry import yaw_from_quat
 
 from .loader import Annotation, Scene, ZodLoader
 

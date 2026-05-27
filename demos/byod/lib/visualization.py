@@ -1,7 +1,7 @@
 """Visualization helpers for the BYOD demo.
 
 These helpers live alongside the adapter package (rather than in
-`src/lakevision/`) because they consume the BYOD adapter Protocol's
+`src/mda_query_engine/perception/`) because they consume the BYOD adapter Protocol's
 `visualize_format()` contract — the per-adapter dispatch keys
 (`camera_reader`, `lidar_reader`, `lidar_dtype`, `lidar_stride`) are part of
 the BYOD contract, not part of the LakeVision data model.

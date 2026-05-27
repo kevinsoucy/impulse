@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from lakevision.geometry import yaw_from_quat
+from mda_query_engine.perception.geometry import yaw_from_quat
 
 from .loader import A2D2Loader, Annotation, Scene
 

@@ -34,7 +34,7 @@ resources:
     # ─────────────────────────────────────────────────────────────────────────
     bootstrap_job:
       name: "adas — bootstrap LakeVision tables + ingest metadata"
-      description: "Runs 01_ingest with bootstrap_only=true: creates LakeVision tables from src/lakevision/schema and writes container_tags + channel_tags via the selected adapter. Idempotent."
+      description: "Runs 01_ingest with bootstrap_only=true: creates LakeVision tables from src/mda_query_engine/perception/schema and writes container_tags + channel_tags via the selected adapter. Idempotent."
 
       environments:
         - environment_key: serverless

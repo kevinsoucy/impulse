@@ -5,7 +5,8 @@ adapter implementing this Protocol. Notebooks 03–09 are byte-identical across
 adapters; notebooks 00–02 dispatch through the adapter for dataset-specific
 download, ingest, and scalar derivation. Notebooks 04, 06, 06b, 07 call into
 the adapter only for per-scene row assembly — all geometry, schema encoding,
-window-gating, and OpenLABEL export live in `lakevision.*` core modules.
+window-gating, and OpenLABEL export live in `mda_query_engine.perception.*`
+core modules.
 
 Adapter authorship contract:
 - Each adapter is a Python package under `demos/byod/adapters/<name>/`.
@@ -81,7 +82,7 @@ class Adapter(Protocol):
         self, scene: SceneLike, min_confidence: float
     ) -> list[dict]:
         """Return `object_tracks` rows for one scene. Thin row assembly only —
-        geometry/encoding helpers live in `lakevision.geometry`."""
+        geometry/encoding helpers live in `mda_query_engine.perception.geometry`."""
 
     # ── Phase 4 (notebooks 06, 06b) ─────────────────────────────────────────
 

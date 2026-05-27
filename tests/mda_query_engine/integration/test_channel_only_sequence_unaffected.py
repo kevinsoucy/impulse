@@ -51,7 +51,7 @@ class TestNoLakeVisionSideCarForChannelOnlySequence:
         import pyspark.sql.types as T
         from pyspark.sql import Row
 
-        from lakevision.events import materialize_event_instance_object_rows
+        from mda_query_engine.perception.events import materialize_event_instance_object_rows
 
         class _ChannelOnlyExpr(TimeSeriesExpression):
             def __init__(self):

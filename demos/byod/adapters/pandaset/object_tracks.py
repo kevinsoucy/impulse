@@ -14,7 +14,7 @@ from collections.abc import Iterable
 
 import numpy as np
 
-from lakevision.geometry import LANE_WIDTH_M, azimuth_sector, lane_offset
+from mda_query_engine.perception.geometry import LANE_WIDTH_M, azimuth_sector, lane_offset
 
 from .loader import Annotation, PandaSetLoader, Scene
 
