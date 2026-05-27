@@ -20,7 +20,6 @@ sets for KPI rollups, exports, and training-data manifests.
 - [Per-object windowing with track_scope](#per-object-windowing-with-track_scope)
 - [Compound predicates](#compound-predicates)
 - [Temporal sequences](#temporal-sequences)
-- [Worked example: multi-source compound query](#worked-example-multi-source-compound-query)
 
 ## Basic events over scalar channels
 
@@ -167,34 +166,23 @@ report.add_event(cut_in)
 
 ## Compound predicates
 
-Two patterns that frame-level or per-object scope alone cannot express:
+Two patterns that a single `PerceptionEvent` cannot express today:
 
-- **Two different objects in the same frame.** "A cyclist and a pedestrian both
-  visible on the left at the same time."
-- **A perception condition together with a scalar-channel condition.** "A
-  cyclist on the left while vehicle speed exceeds 30 kph."
+- **Two different object classes in the same frame.** "A cyclist and a
+  pedestrian both visible on the left at the same time." Each `PerceptionEvent`
+  predicate is evaluated across all rows — `detection_class("cyclist") &
+  detection_class("pedestrian")` on the same expression would require both
+  conditions to hold on the *same row*, which is never true. Run two separate
+  events and overlap-join the results post-solve.
 
-The current supported pattern is to run the two events separately and join on
-`event_instance_fact`, or to use `SequenceOfEvents` when the two conditions are
-temporally ordered (including "simultaneous" via `max_step_duration_ms=0`).
+- **A perception condition combined inline with a scalar-channel condition.**
+  "A cyclist on the left while vehicle speed exceeds 30 kph." A
+  `PerceptionEvent` expression cannot reference `BasicEvent` scalar channels
+  directly. The supported pattern is `SequenceOfEvents` with `max_step_duration_ms=0`
+  for simultaneous conditions, or a post-solve join on `event_instance_fact`.
 
-For the two-objects-same-frame case, run each object predicate as a separate
-`PerceptionEvent`, then join the resulting `event_instance_fact` rows on
-`(container_id, start_ts, end_ts)` to find overlapping windows:
-
-```python
-cyclist_left = PerceptionEvent(
-    name="cyclist_present_left",
-    expr=(ot.detection_class("cyclist")) & ot.azimuth("front_left"),
-)
-pedestrian_left = PerceptionEvent(
-    name="pedestrian_present_left",
-    expr=(ot.detection_class("pedestrian")) & ot.azimuth("front_left"),
-)
-report.add_event(cyclist_left)
-report.add_event(pedestrian_left)
-# Post-solve: overlap join on event_instance_fact to find co-occurring windows.
-```
+Both are known limitations of the current architecture. Inline multi-predicate
+support is tracked in the backlog.
 
 ## Temporal sequences
 
@@ -232,70 +220,3 @@ aeb_then_clear = SequenceOfEvents(
 report.add_event(aeb_then_clear)
 ```
 
-## Worked example: multi-source compound query
-
-The scenario: find windows where a cyclist was detected with low confidence on
-a production LiDAR sensor, followed within 2 seconds by a high-confidence
-detection from a roof-rack reference LiDAR on the same test vehicle.
-
-```python
-ot = db.query.object_track
-
-# 1. Scope to dual-LiDAR test vehicles.
-gt_lidar_containers = ContainerEvent(
-    name="gt_lidar_rig_containers",
-    attributes={"vehicle_config": "dual_lidar"},
-    desc="Recordings from a test vehicle equipped with a roof-rack reference LiDAR",
-)
-
-# 2. Low-confidence cyclist on the production in-car sensor.
-cyclist_lowconf_prod = PerceptionEvent(
-    name="cyclist_lowconf_prod",
-    expr=(ot.detection_class("cyclist"))
-         & ot.source_contains("lidar_inboard")
-         & (ot.confidence < 0.5),
-    container_filter=gt_lidar_containers,
-    desc="Cyclist with low production-LiDAR confidence on dual-LiDAR containers",
-)
-
-# 3. High-confidence cyclist on the roof-rack reference sensor.
-cyclist_highconf_gt = PerceptionEvent(
-    name="cyclist_highconf_gt",
-    expr=(ot.detection_class("cyclist"))
-         & ot.source_contains("lidar_roof_rack")
-         & (ot.confidence >= 0.8),
-    container_filter=gt_lidar_containers,
-    desc="Cyclist with high confidence on the roof-rack reference LiDAR",
-)
-
-# 4. Sequence: low-confidence on production followed by high-confidence on reference.
-cyclist_disagreement = SequenceOfEvents(
-    name="cyclist_prod_lowconf_then_gt_highconf",
-    expressions=[
-        cyclist_lowconf_prod.get_expression(),
-        cyclist_highconf_gt.get_expression(),
-    ],
-    container_filter=gt_lidar_containers,
-    max_step_duration_ms=2000,
-    desc="Production LiDAR low-confidence cyclist followed within 2 s by "
-         "roof-rack high-confidence detection — likely production sensor miss",
-)
-
-report.add_event(cyclist_lowconf_prod)
-report.add_event(cyclist_highconf_gt)
-report.add_event(cyclist_disagreement)
-report.run()
-```
-
-**What each construct does.**
-
-- `ContainerEvent` scopes the entire query to containers tagged
-  `vehicle_config = "dual_lidar"`. The same instance is reused as
-  `container_filter=` on every downstream event — one filter, declared once,
-  pushed into every source scan.
-- Each `PerceptionEvent` produces windows independently into
-  `event_instance_fact`.
-- `SequenceOfEvents` adds the temporal constraint — the two windows must appear
-  in order within 2 seconds of each other on the same `container_id`.
-- All three share the same `event_instance_fact` output schema, so playlist
-  curation, KPI dashboards, and OpenLABEL exports work identically across them.

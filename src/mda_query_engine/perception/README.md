@@ -13,9 +13,6 @@ types needed to find, window, and record perception-level scenarios.
 > how to write `PerceptionEvent` predicates against your data, compose them
 > with `BasicEvent` scalar conditions, and use `SequenceOfEvents` with
 > perception inputs.
->
-> **Roadmap:** [`docs/04_roadmap.md`](docs/04_roadmap.md) — what is planned
-> beyond the shipped capabilities and why.
 
 ## Quick start
 
