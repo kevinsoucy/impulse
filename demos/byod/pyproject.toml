@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "byod-demo"
+version = "0.1.0"
+description = "BYOD demo runtime — adapter Protocol + per-dataset adapters"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lib", "lib.*", "adapters", "adapters.nuscenes", "adapters.nuscenes.*"]
+
+[tool.setuptools.package-data]
+"adapters.nuscenes" = ["config.yaml"]

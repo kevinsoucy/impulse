@@ -78,6 +78,12 @@ Notes specific to Impulse:
   Delta enabled and creates the `silver`, `silver_narrow_db`, `silver_key_value_store`, and
   `gold` schemas. You don't need a Databricks workspace to run the unit tests.
 - Spark warehouse output is written to `spark-warehouse/` (gitignored).
+- **LakeVision schema tests** (`tests/lakevision/unit/`) are pure-Python introspection of
+  `StructType` definitions and dataclass validators — no JVM required. A local
+  [`tests/lakevision/unit/conftest.py`](tests/lakevision/unit/conftest.py) overrides the
+  inherited Spark autouse fixtures with no-ops, so these tests run in ~30 ms without Java.
+  Future LakeVision integration tests should live in `tests/lakevision/integration/` which
+  will inherit the real Spark fixtures.
 
 ## Code style
 

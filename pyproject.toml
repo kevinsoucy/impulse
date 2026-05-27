@@ -7,7 +7,7 @@ name = "databricks-impulse"
 dynamic = ["version"]
 description = "Large-scale time-series measurement data analytics on Apache Spark"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.11,<3.13"
 license = {file = "LICENSE.txt"}
 authors = [
     {name = "Databricks Labs"}
@@ -15,11 +15,7 @@ authors = [
 maintainers = [
     {name = "Databricks Labs"}
 ]
-dependencies = [
-    "delta-spark==4.0.1",
-    "lz4==4.4.5",
-    "nptyping==2.5.0",
-]
+dependencies = []
 
 # Pre-installed on Databricks Serverless env v4 (and DBR ML runtimes).
 # Declared as opt-in extras so the wheel installs cleanly on Databricks
@@ -28,7 +24,10 @@ dependencies = [
 [project.optional-dependencies]
 local-dev = [
     "databricks-sdk==0.106.0",
+    "delta-spark==4.0.1",
+    "lz4==4.4.5",
     "matplotlib==3.10.0",
+    "nptyping==2.5.0",
     "pandas==2.2.3",
     "pyarrow==19.0.1",
     "pydantic==2.11.7",
@@ -44,6 +43,7 @@ Issues = "https://github.com/databrickslabs/impulse/issues"
 
 [dependency-groups]
 dev = [
+    "asammdf>=8.0",
     "pre-commit==4.1.0",
     "pydoc-markdown==4.8.2",
     "pytest==8.3.5",
@@ -65,7 +65,7 @@ exclude = ["src/*/demos"]
 
 # Pytest options
 [tool.pytest.ini_options]
-pythonpath = [".", "src/mda_reporting"]
+pythonpath = [".", "src/mda_reporting", "src"]
 testpaths = ["tests"]
 addopts = "--junitxml=test-results.xml --cov=src --cov-report=html --cov-report=xml:coverage.xml --cov-report=term-missing"
 
@@ -134,7 +134,7 @@ ignore = [
 convention = "numpy"
 
 [tool.ruff.lint.isort]
-known-first-party = ["mda_query_engine", "mda_reporting"]
+known-first-party = ["mda_query_engine", "mda_reporting", "lakevision"]
 
 [tool.black]
 line-length = 99

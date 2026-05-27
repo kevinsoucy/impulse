@@ -1,0 +1,51 @@
+# Base environment for interactive serverless notebook use.
+#
+# Why this file exists: a notebook's Environment side panel ("Custom" → select
+# a YAML file from /Workspace/...) needs an env spec for interactive opens.
+# Job runs use the env in resources/jobs.yml; interactive runs ignore that and
+# fall back to the bare serverless default — which is missing impulse, mda_reporting,
+# pydantic 2.x, etc., so cell 1 fails with ModuleNotFoundError.
+#
+# Usage (one-time, per notebook, per SA):
+#   1. Open any notebook deployed by this bundle.
+#   2. Click the Environment side panel (top-right of the notebook editor).
+#   3. Base environment → Custom → file picker.
+#   4. Select: /Workspace/Shared/.bundle/lakevision_demo/files/bundles/lakevision_demo/notebook_env.yml
+#   5. Apply. Kernel restarts with these deps; mda_reporting / lib / adapters all resolve.
+#
+# Alternatively, a workspace admin can ⭐ this file in the Base Environments
+# admin page → it becomes the workspace-wide default for new serverless notebooks.
+#
+# Maintenance: keep this list in lockstep with the `dependencies` block in
+# resources/jobs.yml. If you bump a wheel version (e.g., the impulse wheel),
+# update BOTH files. The wheel filenames here are absolute paths into the
+# DAB-managed artifacts root — they only resolve correctly after `bundle
+# deploy --target shared` has built and uploaded them.
+#
+# !!! WHEEL FILENAME DRIFT !!!
+# The two wheel filenames below are version-pinned. They MUST be edited in
+# lockstep with:
+#   - impulse repo's VERSION file (drives `databricks_impulse-<X.Y.Z>-...`)
+#   - demos/byod/pyproject.toml `version = "..."` (drives `byod_demo-<X.Y.Z>-...`)
+# When either bumps, `uv build --wheel` produces a NEW filename and the lines
+# below silently stop matching what `bundle deploy` uploads to
+# /Workspace/Shared/.bundle/lakevision_demo/artifacts/.internal/. The same
+# pinning lives in resources/jobs.yml — update BOTH on every version bump or
+# job runs will fail at task start with "wheel not found" and interactive
+# notebook attachment will fail with a generic "file not found".
+# Current pins: impulse 0.0.2, byod-demo 0.1.0.
+
+environment_version: '4'
+
+dependencies:
+  - /Workspace/Shared/.bundle/lakevision_demo/artifacts/.internal/databricks_impulse-0.0.2-py3-none-any.whl
+  - /Workspace/Shared/.bundle/lakevision_demo/artifacts/.internal/byod_demo-0.1.0-py3-none-any.whl
+  - numpy==2.1.3
+  - pandas==2.2.3
+  - pyarrow==19.0.1
+  - scipy==1.15.1
+  - matplotlib==3.10.0
+  - scikit-learn>=1.6,<2
+  - nuscenes-devkit==1.1.9
+  - PyYAML
+  - pydantic==2.11.7

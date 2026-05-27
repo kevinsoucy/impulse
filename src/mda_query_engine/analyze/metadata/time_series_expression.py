@@ -127,6 +127,9 @@ class TimeSeriesExpression(abc.ABC):
     def __rand__(self, other: TimeSeriesExpression | bool) -> TimeSeriesOp:
         return TimeSeriesOp(operator.and_, "builtin", other, self)
 
+    def __invert__(self) -> TimeSeriesOp:
+        return TimeSeriesOp(operator.invert, "builtin", self)
+
     @abc.abstractmethod
     def build(self, cache: SeriesCache) -> Any:
         """

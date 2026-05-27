@@ -61,6 +61,7 @@ logs/
 dbfs/
 .dbx/
 spark-warehouse
+.databricks/
 
 # Dependencies
 node_modules/

@@ -11,7 +11,12 @@ from .points_in_time import PointsInTime
 
 class Intervals:
     def __init__(
-        self, tstarts: npt.NDArray, tends: npt.NDArray, merge_overlaps=False, del_last_empty=False
+        self,
+        tstarts: npt.NDArray,
+        tends: npt.NDArray,
+        merge_overlaps=False,
+        del_last_empty=False,
+        bounds: tuple[float, float] | None = None,
     ):
         """
         Initialize the Intervals object.
@@ -26,9 +31,14 @@ class Intervals:
             If True, merge overlapping and consecutive intervals (default is False).
         del_last_empty : bool, optional
             If True, remove empty intervals at the end (default is False).
+        bounds : tuple of (float, float) or None, optional
+            Optional ``(t_min, t_max)`` describing the surrounding time window
+            against which complement is taken in ``__invert__``.  Required for
+            ``~intervals`` semantics; ignored by ``__and__`` / ``__or__``.
         """
         self.tstarts = np.array(tstarts, dtype=np.float64)
         self.tends = np.array(tends, dtype=np.float64)
+        self.bounds = bounds
         if merge_overlaps:
             self.merge_overlaps(inplace=True)
         # filter out empty
@@ -446,6 +456,59 @@ class Intervals:
         ends = np.append(self.tends, other.tends)
         sortidx = np.argsort(starts)
         return Intervals(starts[sortidx], ends[sortidx], merge_overlaps=True)
+
+    def __invert__(self) -> Intervals:
+        """
+        Returns the complement against the surrounding time window.
+
+        The complement of ``[(a_1, b_1), …, (a_n, b_n)]`` within ``[t_min, t_max]``
+        is the set of gaps ``[(t_min, a_1), (b_1, a_2), …, (b_n, t_max)]``,
+        with empty pieces dropped.  ``bounds`` must be set on this object —
+        either at construction or via ``with_bounds`` — because complement
+        only makes sense relative to a containing window.
+
+        Returns
+        -------
+        Intervals
+            Complement intervals over ``bounds``.
+
+        Raises
+        ------
+        ValueError
+            If ``bounds`` has not been set on this object.
+        """
+        if self.bounds is None:
+            raise ValueError(
+                "Cannot complement Intervals without bounds. "
+                "Set `bounds=(t_min, t_max)` at construction or via with_bounds()."
+            )
+        t_min, t_max = self.bounds
+        merged = self.merge_overlaps() if len(self) > 0 else self
+        boundaries = np.concatenate(([t_min], merged.tends, [t_max]))
+        gap_starts = boundaries[:-1]
+        gap_ends = np.concatenate((merged.tstarts, [t_max]))
+        keep = gap_starts < gap_ends
+        return Intervals(gap_starts[keep], gap_ends[keep], bounds=self.bounds)
+
+    def with_bounds(self, bounds: tuple[float, float]) -> Intervals:
+        """
+        Return a copy with ``bounds`` attached.
+
+        Used by callers that built an ``Intervals`` without bounds and need
+        to make it invertible against a window known later (e.g. the solver
+        attaches container bounds before running ``~``).
+
+        Parameters
+        ----------
+        bounds : tuple of (float, float)
+            ``(t_min, t_max)`` for complement.
+
+        Returns
+        -------
+        Intervals
+            New ``Intervals`` with bounds attached.
+        """
+        return Intervals(self.tstarts, self.tends, bounds=bounds)
 
     def __len__(self) -> int:
         """
