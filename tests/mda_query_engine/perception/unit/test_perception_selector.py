@@ -167,6 +167,55 @@ class TestSourceContainsBuildBehavior:
         result = sel.build(cache)
         assert len(result) == 0
 
+    def test_multi_object_only_lidar_object_contributes_intervals(self):
+        # Object 10 always has lidar; object 20 only has camera.
+        # The per-container selector returns intervals for object 10 frames only.
+        cache = _make_cache(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "source": "lidar|camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "source": "lidar|camera"},
+                {"container_id": 1, "object_id": 20, "frame_ts": 100.0, "source": "camera"},
+                {"container_id": 1, "object_id": 20, "frame_ts": 200.0, "source": "camera"},
+            ]
+        )
+        sel = PerceptionSelector("source", "contains", "lidar")
+        result = sel.build(cache)
+        assert isinstance(result, Intervals)
+        assert len(result) >= 1
+        assert result.start_time() == 100.0
+
+    def test_null_source_treated_as_non_matching(self):
+        # None source fills to "" which does not contain "lidar" — should not crash
+        # and should not contribute an interval.
+        cache = _make_cache(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "source": None},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "source": "lidar"},
+            ]
+        )
+        sel = PerceptionSelector("source", "contains", "lidar")
+        result = sel.build(cache)
+        # Only frame 200 matches; frame 100 (None source) does not.
+        assert result.start_time() == 200.0
+
+    def test_non_contiguous_matching_frames_produce_separate_intervals(self):
+        # LiDAR at frame 100, camera-only at 200 and 300, LiDAR again at 400.
+        # The gap at 200-300 should produce two disjoint intervals, not one merged window.
+        cache = _make_cache(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "source": "lidar|camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "source": "camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 300.0, "source": "camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 400.0, "source": "lidar|radar"},
+            ]
+        )
+        sel = PerceptionSelector("source", "contains", "lidar")
+        result = sel.build(cache)
+        # Frame 100 → [100, 200); frame 400 → [400, 401).  The gap (200-400) breaks
+        # these into two separate intervals.
+        assert len(result) == 2
+        assert result.start_time() == 100.0
+
 
 class TestPerceptionSelectorASTRoundTrip:
     def test_as_dict_and_from_dict_preserve_predicate(self):

@@ -129,6 +129,14 @@ class TestMixedSelectionTypes:
         assert all(len(w) == 2 for w in unscoped_windows)
 
 
+def _cut_in_selection(scoped):
+    return (
+        scoped.detection_class("car")
+        & (scoped.lane_offset == 0)
+        & (scoped.relative_velocity_ms < 0.0)
+    ).alias("cut_in")
+
+
 class TestCutInPredicate:
     """Cut-in example from 03_authoring_events.md.
 
@@ -165,19 +173,12 @@ class TestCutInPredicate:
         self, col_map, empty_channels_pdf
     ):
         scoped = ObjectTrackAccessor()(track_scope=True)
-        selection = (
-            scoped.detection_class("car")
-            & (scoped.lane_offset == 0)
-            & (scoped.relative_velocity_ms < 0.0)
-        ).alias("cut_in")
-
         out_pdf = PerceptionSolver._solve_perception_udf(
             channels_pdf=empty_channels_pdf,
             object_tracks_pdf=self._cut_in_otp(),
-            selections=[selection],
+            selections=[_cut_in_selection(scoped)],
             col_map=col_map,
         )
-
         windows = out_pdf["cut_in"].iloc[0]
         # Only object 10 satisfies all three conditions; bystander 20 never
         # enters ego lane so its predicate never fires.
@@ -191,12 +192,6 @@ class TestCutInPredicate:
         self, col_map, empty_channels_pdf
     ):
         scoped = ObjectTrackAccessor()(track_scope=True)
-        selection = (
-            scoped.detection_class("car")
-            & (scoped.lane_offset == 0)
-            & (scoped.relative_velocity_ms < 0.0)
-        ).alias("cut_in")
-
         otp = pd.DataFrame(
             [
                 {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
@@ -208,11 +203,127 @@ class TestCutInPredicate:
         out_pdf = PerceptionSolver._solve_perception_udf(
             channels_pdf=empty_channels_pdf,
             object_tracks_pdf=otp,
-            selections=[selection],
+            selections=[_cut_in_selection(scoped)],
             col_map=col_map,
         )
         windows = out_pdf["cut_in"].iloc[0]
         assert len(windows) == 0
+
+    def test_positive_velocity_car_in_ego_lane_does_not_fire(
+        self, col_map, empty_channels_pdf
+    ):
+        # Car is in lane 0 but moving away (rv >= 0) — all three conditions must
+        # hold simultaneously; rv >= 0 breaks the third condition.
+        scoped = ObjectTrackAccessor()(track_scope=True)
+        otp = pd.DataFrame(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 6.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": 2.0},  # receding
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 7.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": 0.0},  # stationary
+            ]
+        )
+        out_pdf = PerceptionSolver._solve_perception_udf(
+            channels_pdf=empty_channels_pdf,
+            object_tracks_pdf=otp,
+            selections=[_cut_in_selection(scoped)],
+            col_map=col_map,
+        )
+        windows = out_pdf["cut_in"].iloc[0]
+        assert len(windows) == 0
+
+    def test_two_objects_both_cutting_in_emit_separate_triples(
+        self, col_map, empty_channels_pdf
+    ):
+        # Two cars each cut into ego lane at different times; each should
+        # produce its own track-scoped triple with the correct object_id.
+        scoped = ObjectTrackAccessor()(track_scope=True)
+        otp = pd.DataFrame(
+            [
+                # Car 10 — cuts in at ts=200.
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "car", "azimuth": "front_left",
+                 "distance_m": 8.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 1, "relative_velocity_ms": -2.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 7.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -2.0},
+                # Car 30 — cuts in at ts=500.
+                {"container_id": 1, "object_id": 30, "frame_ts": 400.0,
+                 "detection_class": "car", "azimuth": "front_right",
+                 "distance_m": 9.0, "confidence": 0.85, "source": "lidar",
+                 "lane_offset": -1, "relative_velocity_ms": -1.5},
+                {"container_id": 1, "object_id": 30, "frame_ts": 500.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 8.0, "confidence": 0.85, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -1.5},
+            ]
+        )
+        out_pdf = PerceptionSolver._solve_perception_udf(
+            channels_pdf=empty_channels_pdf,
+            object_tracks_pdf=otp,
+            selections=[_cut_in_selection(scoped)],
+            col_map=col_map,
+        )
+        windows = out_pdf["cut_in"].iloc[0]
+        assert len(windows) == 2
+        object_ids = sorted(int(w[2]) for w in windows)
+        assert object_ids == [10, 30]
+        starts_by_id = {int(w[2]): w[0] for w in windows}
+        assert starts_by_id[10] == 200.0
+        assert starts_by_id[30] == 500.0
+
+    def test_cut_in_window_ends_when_car_leaves_ego_lane(
+        self, col_map, empty_channels_pdf
+    ):
+        # Car enters ego lane at ts=200, holds it through ts=400, then returns
+        # to lane 1 at ts=500.  The window should end at ~500, not span the
+        # entire track lifetime.
+        scoped = ObjectTrackAccessor()(track_scope=True)
+        otp = pd.DataFrame(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "car", "azimuth": "front_left",
+                 "distance_m": 9.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 1, "relative_velocity_ms": -2.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+                 "detection_class": "car", "azimuth": "front_left",
+                 "distance_m": 8.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -2.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 300.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 7.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -1.5},
+                {"container_id": 1, "object_id": 10, "frame_ts": 400.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 6.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -1.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 500.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 5.5, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 1, "relative_velocity_ms": -0.5},  # back to lane 1
+            ]
+        )
+        out_pdf = PerceptionSolver._solve_perception_udf(
+            channels_pdf=empty_channels_pdf,
+            object_tracks_pdf=otp,
+            selections=[_cut_in_selection(scoped)],
+            col_map=col_map,
+        )
+        windows = out_pdf["cut_in"].iloc[0]
+        assert len(windows) == 1
+        assert int(windows[0][2]) == 10
+        # Window opens at the first ego-lane frame.
+        assert windows[0][0] == 200.0
+        # Window must end at or before ts=500 (the frame where car leaves lane 0).
+        # The interval end comes from lane_offset==0's last matching frame (400)
+        # whose next_ts is 500 → end = 500.
+        assert windows[0][1] <= 500.0
 
 
 class TestEmptyInputs:

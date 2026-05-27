@@ -188,37 +188,35 @@ class TestMultiValueAzimuthOrPattern:
     is to combine string-column predicates with ``|``.
     """
 
-    def _cache_with_azimuth_variety(self):
-        channels_pdf = pd.DataFrame(
-            {
-                "container_id": pd.Series([], dtype="int64"),
-                "channel_id": pd.Series([], dtype="int64"),
-                "tstart": pd.Series([], dtype="float64"),
-                "tend": pd.Series([], dtype="float64"),
-                "value": pd.Series([], dtype="float64"),
-            }
+    _EMPTY_CHANNELS = {
+        "container_id": pd.Series([], dtype="int64"),
+        "channel_id": pd.Series([], dtype="int64"),
+        "tstart": pd.Series([], dtype="float64"),
+        "tend": pd.Series([], dtype="float64"),
+        "value": pd.Series([], dtype="float64"),
+    }
+    _COL_MAP = {"cid": "container_id", "ch": "channel_id",
+                "ts": "tstart", "te": "tend", "val": "value"}
+
+    def _make_otp_cache(self, rows):
+        return PerceptionCache(
+            channels_pdf=pd.DataFrame(self._EMPTY_CHANNELS),
+            col_map=self._COL_MAP,
+            object_tracks_pdf=pd.DataFrame(rows),
         )
-        col_map = {"cid": "container_id", "ch": "channel_id",
-                   "ts": "tstart", "te": "tend", "val": "value"}
-        otp = pd.DataFrame(
-            [
-                # frame 100 — front_left: matches
-                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
-                 "detection_class": "pedestrian", "azimuth": "front_left"},
-                # frame 200 — left: matches
-                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
-                 "detection_class": "pedestrian", "azimuth": "left"},
-                # frame 300 — rear: does NOT match any left sector
-                {"container_id": 1, "object_id": 10, "frame_ts": 300.0,
-                 "detection_class": "pedestrian", "azimuth": "rear"},
-            ]
-        )
-        return PerceptionCache(channels_pdf=channels_pdf, col_map=col_map,
-                               object_tracks_pdf=otp)
 
     def test_or_composition_matches_front_left_and_left_sectors(self):
+        # One object alternates through three sectors. Only front_left and
+        # left should match; rear should not.
+        cache = self._make_otp_cache([
+            {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+             "detection_class": "pedestrian", "azimuth": "front_left"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+             "detection_class": "pedestrian", "azimuth": "left"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 300.0,
+             "detection_class": "pedestrian", "azimuth": "rear"},
+        ])
         ot = ObjectTrackAccessor()
-        cache = self._cache_with_azimuth_variety()
         expr = (
             ot.detection_class("pedestrian")
             & (ot.azimuth("front_left") | ot.azimuth("left") | ot.azimuth("rear_left"))
@@ -230,14 +228,64 @@ class TestMultiValueAzimuthOrPattern:
         assert result.start_time() == 100.0
 
     def test_or_composition_excludes_non_matching_azimuth(self):
+        # All frames are in rear — none match any left sector.
+        cache = self._make_otp_cache([
+            {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+             "detection_class": "pedestrian", "azimuth": "rear"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+             "detection_class": "pedestrian", "azimuth": "rear"},
+        ])
         ot = ObjectTrackAccessor()
-        cache = self._cache_with_azimuth_variety()
-        # Only rear_left — none of our test rows have that value.
         expr = (
-            ot.detection_class("pedestrian") & ot.azimuth("rear_left")
-        ).alias("ped_rear_left")
+            ot.detection_class("pedestrian")
+            & (ot.azimuth("front_left") | ot.azimuth("left") | ot.azimuth("rear_left"))
+        ).alias("ped_left_sectors")
         result = expr.build(cache)
         assert len(result) == 0
+
+    def test_two_objects_only_left_sector_object_contributes(self):
+        # Object 10 is always front_left (matches); object 20 is always rear (does not).
+        # Result intervals must start at object 10's first frame.
+        cache = self._make_otp_cache([
+            {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+             "detection_class": "pedestrian", "azimuth": "front_left"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+             "detection_class": "pedestrian", "azimuth": "front_left"},
+            {"container_id": 1, "object_id": 20, "frame_ts": 100.0,
+             "detection_class": "pedestrian", "azimuth": "rear"},
+            {"container_id": 1, "object_id": 20, "frame_ts": 200.0,
+             "detection_class": "pedestrian", "azimuth": "rear"},
+        ])
+        ot = ObjectTrackAccessor()
+        expr = (
+            ot.detection_class("pedestrian")
+            & (ot.azimuth("front_left") | ot.azimuth("left") | ot.azimuth("rear_left"))
+        ).alias("ped_left_sectors")
+        result = expr.build(cache)
+        assert len(result) >= 1
+        assert result.start_time() == 100.0
+
+    def test_interleaved_frames_produce_gap_in_intervals(self):
+        # Single object: front_left at 100, rear at 200, front_left at 300.
+        # The non-matching frame at 200 should break the window so we get
+        # two separate intervals, not one merged window spanning 100–301.
+        cache = self._make_otp_cache([
+            {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+             "detection_class": "pedestrian", "azimuth": "front_left"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+             "detection_class": "pedestrian", "azimuth": "rear"},
+            {"container_id": 1, "object_id": 10, "frame_ts": 300.0,
+             "detection_class": "pedestrian", "azimuth": "front_left"},
+        ])
+        ot = ObjectTrackAccessor()
+        expr = (
+            ot.detection_class("pedestrian")
+            & (ot.azimuth("front_left") | ot.azimuth("left") | ot.azimuth("rear_left"))
+        ).alias("ped_left_sectors")
+        result = expr.build(cache)
+        # Frame 100 → [100, 200); frame 300 → [300, 301).
+        # Gap at 200 means these are two distinct intervals.
+        assert len(result) == 2
 
 
 class TestPerceptionEventBuildsExpression:
