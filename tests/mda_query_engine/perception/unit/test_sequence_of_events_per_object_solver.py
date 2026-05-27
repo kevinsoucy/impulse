@@ -114,6 +114,70 @@ class TestTwoStepTrackScopedSequence:
         assert int(windows[0][2]) == 10
 
 
+class TestPerceptionExpressionAsSequenceStep:
+    """A PerceptionEvent's expression (string-column compound predicate) used
+    directly as a step in SequenceOfEvents — mirrors the aeb_then_clear example
+    in 03_authoring_events.md.
+
+    Both steps here are perception expressions; the pattern being pinned is that
+    string-column selectors (detection_class, azimuth) work correctly as
+    SequenceOfEvents steps.
+    """
+
+    def _otp_car_then_pedestrian(self):
+        """Car present at frames 100–200; pedestrian appears from 150 onward.
+
+        Sequence fires because the pedestrian step's first interval starts
+        at 150, which is before the car interval ends (~201).  The resulting
+        window spans [100, pedestrian-end].
+        """
+        return pd.DataFrame(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 10.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": 0.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 9.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": 0.0},
+                {"container_id": 1, "object_id": 20, "frame_ts": 150.0,
+                 "detection_class": "pedestrian", "azimuth": "front_left",
+                 "distance_m": 6.0, "confidence": 0.85, "source": "lidar|camera",
+                 "lane_offset": 1, "relative_velocity_ms": 0.0},
+                {"container_id": 1, "object_id": 20, "frame_ts": 250.0,
+                 "detection_class": "pedestrian", "azimuth": "front_left",
+                 "distance_m": 5.0, "confidence": 0.85, "source": "lidar|camera",
+                 "lane_offset": 1, "relative_velocity_ms": 0.0},
+            ]
+        )
+
+    def test_string_predicate_step_fires_sequence(
+        self, col_map, empty_channels_pdf
+    ):
+        ot = ObjectTrackAccessor()
+        seq = SequenceOfEvents(
+            name="car_then_pedestrian",
+            expressions=[
+                ot.detection_class("car"),
+                ot.detection_class("pedestrian") & ot.azimuth("front_left"),
+            ],
+        )
+        selection = seq.get_expression()
+
+        out_pdf = PerceptionSolver._solve_perception_udf(
+            channels_pdf=empty_channels_pdf,
+            object_tracks_pdf=self._otp_car_then_pedestrian(),
+            selections=[selection],
+            col_map=col_map,
+        )
+
+        windows = out_pdf[seq.get_name()].iloc[0]
+        assert len(windows) >= 1
+        # Non-scoped: pairs only.
+        assert all(len(w) == 2 for w in windows)
+
+
 class TestNonScopedTwoStepSequenceFallsBackToPerContainer:
     def test_no_track_scope_emits_pairs(self, col_map, empty_channels_pdf):
         ot = ObjectTrackAccessor()

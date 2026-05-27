@@ -139,6 +139,35 @@ class TestPerceptionSelectorChannelStub:
         assert sel.get_required_tag_exprs() == set()
 
 
+class TestSourceContainsBuildBehavior:
+    """source_contains("lidar") filters pipe-delimited source strings correctly."""
+
+    def test_matches_rows_that_include_the_sensor(self):
+        cache = _make_cache(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "source": "lidar|camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "source": "camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 300.0, "source": "lidar|radar|camera"},
+            ]
+        )
+        sel = PerceptionSelector("source", "contains", "lidar")
+        result = sel.build(cache)
+        assert isinstance(result, Intervals)
+        # Frames 100 and 300 include lidar; frame 200 (camera only) does not.
+        assert result.start_time() == 100.0
+
+    def test_excludes_rows_without_the_sensor(self):
+        cache = _make_cache(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0, "source": "camera"},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0, "source": "radar|camera"},
+            ]
+        )
+        sel = PerceptionSelector("source", "contains", "lidar")
+        result = sel.build(cache)
+        assert len(result) == 0
+
+
 class TestPerceptionSelectorASTRoundTrip:
     def test_as_dict_and_from_dict_preserve_predicate(self):
         sel = PerceptionSelector("detection_class", "eq", "cyclist")

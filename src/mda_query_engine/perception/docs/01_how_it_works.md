@@ -5,7 +5,7 @@ This package extends Impulse core with the ability to query `object_tracks`
 TSAL authoring surface that `BasicEvent` already provides.
 
 See [`03_authoring_events.md`](03_authoring_events.md) for the authoring
-walk-through and [`04_roadmap.md`](04_roadmap.md) for what is planned next.
+walk-through.
 
 ## The data model: object_tracks
 

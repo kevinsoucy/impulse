@@ -129,6 +129,92 @@ class TestMixedSelectionTypes:
         assert all(len(w) == 2 for w in unscoped_windows)
 
 
+class TestCutInPredicate:
+    """Cut-in example from 03_authoring_events.md.
+
+    A vehicle detected in the ego lane (lane_offset == 0) while approaching
+    (relative_velocity_ms < 0), with track_scope=True so windows form per
+    (container_id, object_id).
+    """
+
+    def _cut_in_otp(self):
+        return pd.DataFrame(
+            [
+                # Car 10 — adjacent lane at first, then cuts into ego lane.
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "car", "azimuth": "front_left",
+                 "distance_m": 8.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 1, "relative_velocity_ms": -2.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+                 "detection_class": "car", "azimuth": "front_left",
+                 "distance_m": 7.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -2.0},
+                {"container_id": 1, "object_id": 10, "frame_ts": 300.0,
+                 "detection_class": "car", "azimuth": "front",
+                 "distance_m": 6.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 0, "relative_velocity_ms": -1.5},
+                # Bystander 20 — never in ego lane; must not trigger.
+                {"container_id": 1, "object_id": 20, "frame_ts": 200.0,
+                 "detection_class": "car", "azimuth": "rear_right",
+                 "distance_m": 20.0, "confidence": 0.8, "source": "radar",
+                 "lane_offset": -1, "relative_velocity_ms": -0.5},
+            ]
+        )
+
+    def test_cut_in_track_scoped_emits_triple_for_ego_lane_car(
+        self, col_map, empty_channels_pdf
+    ):
+        scoped = ObjectTrackAccessor()(track_scope=True)
+        selection = (
+            scoped.detection_class("car")
+            & (scoped.lane_offset == 0)
+            & (scoped.relative_velocity_ms < 0.0)
+        ).alias("cut_in")
+
+        out_pdf = PerceptionSolver._solve_perception_udf(
+            channels_pdf=empty_channels_pdf,
+            object_tracks_pdf=self._cut_in_otp(),
+            selections=[selection],
+            col_map=col_map,
+        )
+
+        windows = out_pdf["cut_in"].iloc[0]
+        # Only object 10 satisfies all three conditions; bystander 20 never
+        # enters ego lane so its predicate never fires.
+        assert len(windows) == 1
+        assert len(windows[0]) == 3  # [start, end, object_id]
+        assert int(windows[0][2]) == 10
+        # Window must start at the first ego-lane frame (ts=200).
+        assert windows[0][0] == 200.0
+
+    def test_non_ego_lane_car_does_not_fire_cut_in(
+        self, col_map, empty_channels_pdf
+    ):
+        scoped = ObjectTrackAccessor()(track_scope=True)
+        selection = (
+            scoped.detection_class("car")
+            & (scoped.lane_offset == 0)
+            & (scoped.relative_velocity_ms < 0.0)
+        ).alias("cut_in")
+
+        otp = pd.DataFrame(
+            [
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "car", "azimuth": "front_left",
+                 "distance_m": 8.0, "confidence": 0.9, "source": "lidar",
+                 "lane_offset": 1, "relative_velocity_ms": -2.0},
+            ]
+        )
+        out_pdf = PerceptionSolver._solve_perception_udf(
+            channels_pdf=empty_channels_pdf,
+            object_tracks_pdf=otp,
+            selections=[selection],
+            col_map=col_map,
+        )
+        windows = out_pdf["cut_in"].iloc[0]
+        assert len(windows) == 0
+
+
 class TestEmptyInputs:
     def test_empty_object_tracks_emits_no_track_scoped_rows(
         self, col_map, empty_channels_pdf

@@ -102,15 +102,13 @@ lidar_only_cyclist = PerceptionEvent(
 
 ### Multi-value azimuth filtering
 
-Pass a list to `isin` on a string-column proxy when the predicate covers
-several sectors:
+Combine string-column predicates with `|` to match any of several sectors:
 
 ```python
-left_sectors = ["front_left", "left", "rear_left"]
-
 pedestrian_on_left = PerceptionEvent(
     name="pedestrian_any_left_sector",
-    expr=(ot.detection_class("pedestrian")) & ot.azimuth.isin(left_sectors),
+    expr=(ot.detection_class("pedestrian"))
+         & (ot.azimuth("front_left") | ot.azimuth("left") | ot.azimuth("rear_left")),
 )
 ```
 
@@ -188,9 +186,9 @@ report.add_event(cyclist_and_pedestrian)
 ### Perception condition combined with a scalar-channel condition
 
 Inline combination of a `PerceptionSelector` and a scalar channel expression
-is not yet a validated pattern. Use `SequenceOfEvents` with
-`max_step_duration_ms=0` to express simultaneous conditions across the two
-surfaces, or post-join on `event_instance_fact`.
+is not yet a validated pattern. Post-join on `event_instance_fact`, or wrap
+each surface as a separate step in `SequenceOfEvents`, to express conditions
+that span both surfaces.
 
 ## Temporal sequences
 
@@ -221,7 +219,7 @@ aeb_then_clear = SequenceOfEvents(
     name="aeb_then_path_clear",
     expressions=[
         db.channel("AEB_Active") == True,
-        (ot.detection_class("pedestrian")) & (ot.azimuth("front_center")),
+        (ot.detection_class("pedestrian")) & (ot.azimuth("front")),
     ],
     desc="AEB active followed by a pedestrian in the front-center zone clearing",
 )

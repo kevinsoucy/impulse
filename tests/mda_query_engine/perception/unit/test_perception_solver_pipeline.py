@@ -181,6 +181,65 @@ class TestMultiObjectCompoundPredicate:
         assert len(result) == 0
 
 
+class TestMultiValueAzimuthOrPattern:
+    """Replacement for the isin example in 03_authoring_events.md.
+
+    ``isin`` does not exist on ``_StringPredicateBuilder``; the correct pattern
+    is to combine string-column predicates with ``|``.
+    """
+
+    def _cache_with_azimuth_variety(self):
+        channels_pdf = pd.DataFrame(
+            {
+                "container_id": pd.Series([], dtype="int64"),
+                "channel_id": pd.Series([], dtype="int64"),
+                "tstart": pd.Series([], dtype="float64"),
+                "tend": pd.Series([], dtype="float64"),
+                "value": pd.Series([], dtype="float64"),
+            }
+        )
+        col_map = {"cid": "container_id", "ch": "channel_id",
+                   "ts": "tstart", "te": "tend", "val": "value"}
+        otp = pd.DataFrame(
+            [
+                # frame 100 — front_left: matches
+                {"container_id": 1, "object_id": 10, "frame_ts": 100.0,
+                 "detection_class": "pedestrian", "azimuth": "front_left"},
+                # frame 200 — left: matches
+                {"container_id": 1, "object_id": 10, "frame_ts": 200.0,
+                 "detection_class": "pedestrian", "azimuth": "left"},
+                # frame 300 — rear: does NOT match any left sector
+                {"container_id": 1, "object_id": 10, "frame_ts": 300.0,
+                 "detection_class": "pedestrian", "azimuth": "rear"},
+            ]
+        )
+        return PerceptionCache(channels_pdf=channels_pdf, col_map=col_map,
+                               object_tracks_pdf=otp)
+
+    def test_or_composition_matches_front_left_and_left_sectors(self):
+        ot = ObjectTrackAccessor()
+        cache = self._cache_with_azimuth_variety()
+        expr = (
+            ot.detection_class("pedestrian")
+            & (ot.azimuth("front_left") | ot.azimuth("left") | ot.azimuth("rear_left"))
+        ).alias("ped_left_sectors")
+        result = expr.build(cache)
+        # front_left (100) and left (200) match; rear (300) does not.
+        assert isinstance(result, Intervals)
+        assert len(result) >= 1
+        assert result.start_time() == 100.0
+
+    def test_or_composition_excludes_non_matching_azimuth(self):
+        ot = ObjectTrackAccessor()
+        cache = self._cache_with_azimuth_variety()
+        # Only rear_left — none of our test rows have that value.
+        expr = (
+            ot.detection_class("pedestrian") & ot.azimuth("rear_left")
+        ).alias("ped_rear_left")
+        result = expr.build(cache)
+        assert len(result) == 0
+
+
 class TestPerceptionEventBuildsExpression:
     def test_perception_event_wraps_compound_predicate(self):
         ot = ObjectTrackAccessor()
