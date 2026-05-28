@@ -204,6 +204,9 @@ class ContainerEvent(Event):
             ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
         )
 
+        # ContainerEvent has no per-entity scope; group_value stays NULL.
+        df = df.withColumn("group_value", f.lit(None).cast("string"))
+
         # Select only the columns defined in the fact schema
         return df.select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
 

@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import abc
 from abc import ABC
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.column import Column
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
+    from impulse_query_engine.surfaces.row_grouped_surface import RowGroupedSurface
 
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
@@ -34,6 +36,49 @@ class QuerySolver(ABC):
 
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
+        # name -> (surface, source_factory). Read by the cogroup path when
+        # a query's selections include row-grouped leaves with a matching
+        # leaf_kind.
+        self._surface_registry: dict[
+            str, tuple["RowGroupedSurface", Callable[[SparkSession], DataFrame]]
+        ] = {}
+
+    def register_surface(
+        self,
+        surface: "RowGroupedSurface",
+        source_factory: Callable[[SparkSession], DataFrame],
+    ) -> None:
+        """Register a row-grouped surface and the factory that produces its
+        Spark DataFrame.
+
+        The solver consults this registry when a query's selections include
+        ``RowGroupedSelector`` leaves whose ``leaf_kind`` matches a
+        registered surface name. Channel-only queries never touch the
+        registry and run unchanged on the existing fast path.
+
+        The binary cogroup engagement (channels + one surface) is a
+        follow-up that lands the per-container UDF; registering a surface
+        today exposes the API contract so consumers can declare their
+        surfaces alongside the rest of the engine setup.
+
+        Parameters
+        ----------
+        surface : RowGroupedSurface
+            The declarative surface definition.
+        source_factory : Callable[[SparkSession], DataFrame]
+            Called per solve to produce the Spark DataFrame backing this
+            surface. The DataFrame must include a ``container_id`` column
+            so the cogroup can partition on it.
+        """
+        if surface.name in self._surface_registry:
+            raise ValueError(
+                f"Surface {surface.name!r} is already registered on this solver."
+            )
+        self._surface_registry[surface.name] = (surface, source_factory)
+
+    def registered_surfaces(self) -> dict[str, "RowGroupedSurface"]:
+        """Snapshot of registered surfaces, keyed by name."""
+        return {name: pair[0] for name, pair in self._surface_registry.items()}
 
     @staticmethod
     def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:

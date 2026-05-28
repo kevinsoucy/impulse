@@ -224,6 +224,8 @@ class SequenceOfEvents(Event):
                 "event_id",
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
+            # SequenceOfEvents has no per-entity scope; group_value stays NULL.
+            .withColumn("group_value", f.lit(None).cast("string"))
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
             .where(f.col("start_ts") < f.col("end_ts"))
         )

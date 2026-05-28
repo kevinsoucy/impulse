@@ -174,7 +174,9 @@ class QueryBuilder:
         self.selections = list(args)
         return self
 
-    def _collect_time_series_selectors(self, uses_alias=None) -> list[TimeSeriesSelector]:
+    def _collect_time_series_selectors(
+        self, uses_alias=None, leaf_kind: str | None = None
+    ) -> list[TimeSeriesSelector]:
         """Collect deduplicated leaf selectors from this query's selections.
 
         Parameters
@@ -182,6 +184,11 @@ class QueryBuilder:
         uses_alias : bool or None, optional
             When ``True``, keep only alias selectors; when ``False``, keep
             only direct selectors; when ``None`` (default), keep all.
+        leaf_kind : str or None, optional
+            When set, keep only selectors whose ``leaf_kind`` matches.
+            Channel-side filter stages pass ``"channel"`` so row-grouped
+            surface leaves are excluded from channel-tag / channel-metric
+            filtering.
 
         Returns
         -------
@@ -195,6 +202,8 @@ class QueryBuilder:
                 continue
             for selector in expression.get_selectors():
                 if uses_alias is not None and selector.uses_alias != uses_alias:
+                    continue
+                if leaf_kind is not None and selector.leaf_kind != leaf_kind:
                     continue
                 if selector.selector_id in seen_selector_ids:
                     continue
@@ -260,9 +269,13 @@ class QueryBuilder:
             self.result_dtypes,
         ) = self._determine_result_objects_dtypes()
 
-        # extract selectors upfront
-        direct_selectors = self._collect_time_series_selectors(uses_alias=False)
-        aliased_selectors = self._collect_time_series_selectors(uses_alias=True)
+        # extract selectors upfront — channel-side stages only see channel leaves
+        direct_selectors = self._collect_time_series_selectors(
+            uses_alias=False, leaf_kind="channel"
+        )
+        aliased_selectors = self._collect_time_series_selectors(
+            uses_alias=True, leaf_kind="channel"
+        )
 
         # create Query
         tags_df = solver.filter_container_tags(spark, self)

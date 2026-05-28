@@ -47,6 +47,13 @@ class BasicEvent(Event):
             Key-value metadata for the event (e.g. limit_type, limit_direction).
         """
         Event.__init__(self, name)
+        # Auto-finalize a _PartialPredicate so single-predicate events don't
+        # need an explicit .sub_event() call. Cross-entity composition still
+        # requires .sub_event() on each side — that's the authoring boundary
+        # that switches & from per-row fusion to interval-level composition.
+        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
+        if isinstance(expr, _PartialPredicate):
+            expr = expr.sub_event()
         self.expression = expr.alias(name)
         self.description = desc
         self.required_channels = required_channels
@@ -206,6 +213,9 @@ class BasicEvent(Event):
                 "event_id",
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
+            # BasicEvent has no per-entity scope; group_value is NULL for these rows.
+            # GroupedEvent overrides the materialization path to populate it.
+            .withColumn("group_value", f.lit(None).cast("string"))
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
             .where(f.col("start_ts") < f.col("end_ts"))  # Ensure valid time intervals
         )

@@ -548,6 +548,17 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         return self._uses_alias
 
     @property
+    def leaf_kind(self) -> str:
+        """Discriminator identifying which upstream surface this leaf reads.
+
+        Channel leaves return ``"channel"``; row-grouped surface leaves
+        override to return the surface's registered name. The channel-side
+        filter pipeline (``filter_channel_tags`` / ``filter_channel_metrics``)
+        iterates only over selectors whose ``leaf_kind == "channel"``.
+        """
+        return "channel"
+
+    @property
     def selector_id(self) -> int:
         return zlib.crc32(str(self._expr).encode())
 

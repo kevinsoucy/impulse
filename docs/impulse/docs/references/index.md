@@ -11,6 +11,7 @@ options and API documentation.
 - [Event](event.md) - Event detection and processing
 - [Aggregation](aggregation.md) - Aggregation methods and configurations
 - [Persist](persistence.md) - Storage and persistence options for reports and results
+- [Row-grouped surfaces](row_grouped_surfaces.md) - First-class query support for per-frame and per-event tables (ADAS object tracks, defect records, lap events, DTC occurrences)
 - [API Reference](api/) - Auto-generated symbol-level API docs from source-code docstrings
 
 ## Overview

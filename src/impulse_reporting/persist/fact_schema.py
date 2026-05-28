@@ -44,6 +44,11 @@ EVENT_INSTANCE_FACT_SCHEMA = StructType(
         StructField("event_id", IntegerType(), False),
         StructField("start_ts", LongType(), False),
         StructField("end_ts", LongType(), False),
+        # NULL for BasicEvent rows and any event without per-entity scope.
+        # For GroupedEvent rows: the matching entity's identity, serialized
+        # as a string (numeric values as decimal strings, compound keys as
+        # JSON arrays).
+        StructField("group_value", StringType(), True),
     ]
 )
 
