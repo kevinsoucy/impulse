@@ -170,7 +170,7 @@ def split_by_hash_change(
 def collect_solvable_expressions(
     items_by_type: dict[str, list],
     type_enum,
-    exclude_cls: type | None = None,
+    exclude_cls: type | tuple[type, ...] | None = None,
 ) -> list[TimeSeriesExpression]:
     """Collect all non-None expressions from typed items.
 
@@ -180,8 +180,9 @@ def collect_solvable_expressions(
         ``{type_name: [items]}``.
     type_enum : type
         ``EventType`` or ``AggregationType`` enum class.
-    exclude_cls : type | None
-        Skip any type whose class ``issubclass(cls, exclude_cls)``.
+    exclude_cls : type | tuple[type, ...] | None
+        Skip any type whose class ``issubclass(cls, exclude_cls)``. May be a
+        tuple of classes (e.g. ``(ContainerEvent, EntityEvent)``).
 
     Returns
     -------
@@ -209,11 +210,15 @@ def dispatch_events(
     solver: QuerySolver,
     pre_filtered_containers_df: DataFrame | None,
     container_event_cls: type,
+    entity_event_cls: type | None = None,
 ) -> dict:
     """Dispatch ``determine_events`` calls per type.
 
-    Solvable event types receive ``solved_df``; ``ContainerEvent`` receives
-    ``query``/``solver``.
+    Most event types ride the centralized ``solved_df`` (one interval-array
+    column per event). ``ContainerEvent`` and ``EntityEvent`` instead receive
+    ``query``/``solver`` because they have their own materialization paths
+    (container-span rows and entity-attributed rows, respectively) that the
+    presence ``solved_df`` cannot express.
 
     Parameters
     ----------
@@ -226,6 +231,9 @@ def dispatch_events(
     pre_filtered_containers_df : DataFrame | None
     container_event_cls : type
         The ``ContainerEvent`` class.
+    entity_event_cls : type | None
+        The ``EntityEvent`` class. When ``None`` no type is treated as an
+        EntityEvent (preserves callers that don't use entity events).
 
     Returns
     -------
@@ -239,8 +247,11 @@ def dispatch_events(
             continue
         cls = type_enum[type_name].value
 
-        if issubclass(cls, container_event_cls):
-            # ContainerEvent uses filter pipeline, not solved_df
+        if issubclass(cls, container_event_cls) or (
+            entity_event_cls is not None and issubclass(cls, entity_event_cls)
+        ):
+            # ContainerEvent and EntityEvent use the filter pipeline / cogroup,
+            # not solved_df.
             event_dfs[type_name] = cls.determine_events(
                 spark,
                 events,

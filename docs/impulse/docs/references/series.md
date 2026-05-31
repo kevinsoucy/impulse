@@ -1,0 +1,341 @@
+---
+sidebar_position: 7
+title: Series
+---
+
+# Series
+
+Impulse 1.0 modelled measurement recordings as **scalar time-series channels** —
+one numeric value per `(channel, interval)`, RLE-encoded, with the query language
+evaluating predicates against `SampleSeries`. That model handles CAN signals, ECU
+parameters, and analog sensor traces cleanly.
+
+It does not handle a second data shape that shows up across the same customers:
+**per-frame or per-event tables** where many entities can co-exist at the same
+timestamp and each entity carries a wide row of typed attributes. ADAS object
+detections, industrial defect inspections, motorsport lap events, ECU diagnostic
+trouble codes — all share this shape.
+
+A **series** adds first-class support for that second shape. A team registers
+their own table once, in about five lines, and gets the full predicate authoring
+DSL, composition with channel predicates via `&` / `|`, and optional per-entity
+reporting that names which object triggered each matching window.
+
+A scalar channel is just the simplest kind of series: a run-length-encoded
+series with a single `value` payload column and no entity key.
+
+---
+
+## When to use one
+
+A series with an `entity_key` is the right tool when **multiple rows can exist
+for the same `(session, signal, timestamp)`**. If your data doesn't have that
+shape, channels remain the right answer:
+
+| Your data shape | What to use |
+|-----------------|-------------|
+| One scalar value per timestamp per signal | Scalar channels (one channel per signal) |
+| Wide row, one row per timestamp, no per-entity multiplicity | A series with no `entity_key`, or N parallel channels |
+| Multiple rows per `(session, signal, timestamp)`, each row is one detected entity | A series with an `entity_key` |
+| Pre-aggregated intervals (one row per `[tstart, tend)`) | A run-length-encoded series (`tstart_col`/`tend_col`) |
+| Lookup / dimension tables (no timestamp) | Join target, not a query series |
+
+Tables that fit the entity-keyed shape typically also share these correlates:
+each entity carries a wide row of mixed types; entity lifetime is transient (a
+detected object exists for a few frames and is gone, a defect fires and clears);
+and the schema varies across customers and use cases.
+
+---
+
+## Registering a series
+
+A series is a declarative pointer to a Spark table plus the columns Impulse needs
+to evaluate predicates against it. ADAS object detections make a good example:
+
+```python
+from pyspark.sql.types import (
+    StructType, StructField, LongType, DoubleType, StringType,
+)
+from impulse_query_engine.surfaces import Series
+
+OBJECT_TRACKS = Series(
+    name="object_tracks",
+    schema=StructType([
+        StructField("container_id",         LongType(),   nullable=False),
+        StructField("sensor",               StringType(), nullable=False),
+        StructField("frame_ts",             LongType(),   nullable=False),
+        StructField("object_id",            LongType(),   nullable=False),
+        StructField("detection_class",      LongType()),
+        StructField("distance_m",           DoubleType()),
+        StructField("relative_velocity_ms", DoubleType()),
+    ]),
+    session_col="container_id",
+    signal_col="sensor",
+    timestamp_col="frame_ts",
+    entity_key="object_id",
+)
+
+db.register_series(
+    OBJECT_TRACKS,
+    source_factory=lambda spark: spark.table("adas_demo.silver.object_tracks"),
+)
+```
+
+The series maps the customer's physical column names onto the engine's logical
+**roles**, keeping the customer's own schema and payload columns intact:
+
+- **`name`** — a unique identifier used to address this series in the query
+  language (`db.query.series("object_tracks")`) and in the fact-table output.
+- **`schema`** — the Spark schema of the underlying table. May be omitted, in
+  which case it is inferred from the `source_factory` DataFrame at registration.
+- **`session_col`** — the column mapped to the session-identity role (the same
+  partition key channels use). Defaults to `"session_id"`; the example overrides
+  it to `"container_id"`.
+- **`signal_col`** — the column mapped to the signal-identity role. Defaults to
+  `"signal_id"`; the example overrides it to `"sensor"` (values like `"lidar"`,
+  `"radar"`, `"camera_front"`). Signal is a first-class filtering dimension — the
+  equivalent of a channel in Impulse 1.0 — so every series must carry one.
+- **One time-axis shape**, exactly one of:
+  - **`timestamp_col`** (point-in-time) — each row is a sample at an instant;
+    Impulse synthesizes `[frame_ts_i, frame_ts_{i+1})` intervals from the
+    per-`(session, signal)` frame list at evaluation time, closing the final
+    frame at the session's stop timestamp.
+  - **`tstart_col` + `tend_col`** (run-length-encoded) — each row already carries
+    its own `[tstart, tend)` interval, used directly.
+- **`entity_key`** — the column (or tuple of columns) that identifies a single
+  entity (an object ID, a station, a driver, an ECU). When set, the series carries
+  per-entity multiplicity and supports `.entity_condition()`. An entity key is
+  **scoped to its signal**: object `47` from `lidar` and object `47` from `radar`
+  are distinct entities. Omit it for one timeline per `(session, signal)` (e.g.
+  channels, IMU).
+
+The columns mapped to a role (`session_col`, `signal_col`, the time-axis columns,
+`entity_key`) are **structural** and are not exposed as predicate proxies. Every
+*other* column is a payload column you can author predicates against — here
+`detection_class`, `distance_m`, `relative_velocity_ms`.
+
+### Optional signal validation
+
+`register_series` accepts an opt-in `valid_signals` set. When supplied (with a
+`spark` session), registration reads the source table's distinct `signal_col`
+values and fails fast if any are **not** in the set — so a typo'd or unregistered
+signal can't be silently dropped at query time. Omit it and registration requires
+no signal metadata at all (the default; signal values live in the data and are
+queried directly).
+
+---
+
+## Authoring predicates
+
+Predicates on a series use the same Python operators as predicates on channels,
+authored through an accessor whose attributes match the schema's payload columns:
+
+```python
+ot = db.query.series("object_tracks")
+
+# A close cyclist — class 1 in this deployment's catalog.
+cyclist_close = (ot.detection_class == 1) & (ot.distance_m < 8.0)
+```
+
+A few things to notice:
+
+- Each column access (`ot.distance_m`) reflects the schema and returns a typed
+  proxy. **Numeric** columns support `<`, `<=`, `==`, `!=`, `>=`, `>`, `isin`,
+  and null checks. **String** columns support `==`, `!=`, `isin`, `contains`,
+  `startswith`, `endswith`, `matches` (regex), and null checks — ordering
+  operators are intentionally absent. Any other type (arrays, structs, maps) and
+  the structural columns raise a clear `AttributeError` naming the column and its
+  Spark type.
+- `&` and `|` **on the same series compose per-row** — each row is checked against
+  the combined predicate. A close pedestrian sharing a timestamp with a far
+  cyclist does *not* match the close-cyclist predicate, because no single row
+  satisfies both clauses.
+- The result composes with channel predicates and feeds into events without any
+  special handling.
+
+**Series support predicates only — not aggregations.** There is no `.mean()` /
+`.sum()` / histogram on a series column; those remain a channels-only capability.
+To aggregate a series payload, compute it upstream and register the result as its
+own series or channel.
+
+### Composing with channel predicates
+
+The payoff is composition. A series predicate produces the same `Intervals` shape
+a channel predicate does, so the two combine in one expression:
+
+```python
+ego_fast = db.query.signal("Vehicle Speed Sensor") > 30  # km/h
+
+near_miss_at_speed = ego_fast & cyclist_close
+```
+
+The result is the set of windows when ego speed exceeded 30 km/h and a cyclist
+was within 8 meters. The author writes channel-side and series-side clauses side
+by side; the engine routes each leaf to its own evaluation path and intersects
+the results in time. (`db.query.signal(name)` is name sugar for
+`db.query.channel(channel_name=name)`.)
+
+---
+
+## Per-entity reporting
+
+The composition above answers "did this combination ever hold?" — a
+session-scoped answer. Many investigations need a finer-grained answer: *which*
+cyclist, *which* station, *which* ECU.
+
+`EntityEvent` materializes that identity. It runs the predicate per entity and
+writes the matching entity's identity into the `entity_key` column on the event
+fact table. A bare single-series predicate is per-entity by intent, so the
+constructor auto-finalizes it (no explicit `.entity_condition()` needed):
+
+```python
+from impulse_reporting.events.entity_event import EntityEvent
+
+near_miss_per_object = EntityEvent(
+    name="cyclist_near_miss_per_object",
+    expr=(ot.detection_class == 1) & (ot.distance_m < 8.0),
+)
+```
+
+When two cyclists trigger the predicate during the same window of a recording,
+the fact table carries two rows — one per cyclist — both overlapping in time. A
+`BasicEvent` would have collapsed them to a single session-scoped row.
+
+`entity_key` is a string column carrying a nested JSON map
+`{table: {signal: [ids]}}` — for example `{"object_tracks": {"radar": ["47"]}}`.
+Single ids serialize as their decimal representation (`"47"`); compound entity
+keys serialize as a JSON array (`"[10, 1]"`). Existing event types (`BasicEvent`,
+`ContainerEvent`, `SequenceOfEvents`) populate the column with `NULL`, so existing
+reports are unchanged.
+
+`per_entity_windowing` (default `True`) emits one row per participating entity /
+co-occurring entity set, each with its own interval. Set it `False` to emit one
+combined row per matched window with the union map of all participating entities.
+
+---
+
+## Cross-entity correlation
+
+A different question shows up across the same domains: *did entity A do X while
+entity B did Y in the same recording?* — a close cyclist while an oncoming car
+decelerated sharply, a defect on Unit A while a process anomaly fired on Unit B,
+an emissions DTC on the engine ECU while a torque DTC fired on the transmission
+ECU.
+
+This is *not* a per-row predicate. No single row is both a cyclist and a car. The
+author wants the *time-overlap* of two independent same-entity windows.
+
+Express this by calling `.entity_condition()` on each side. That finalizes the
+partial as an **entity-scoped** leaf — "all my clauses must hold for the same
+entity; from here, treat me as a session-scope window":
+
+```python
+cyclist_close = (
+    (ot.detection_class == 1) & (ot.distance_m < 8.0)
+).entity_condition()
+
+car_decel_close = (
+    (ot.detection_class == 2)
+    & (ot.distance_m < 15.0)
+    & (ot.relative_velocity_ms < -0.5)
+).entity_condition()
+
+co_occurrence = cyclist_close & car_decel_close
+```
+
+Each `.entity_condition()` reduces its side to session-scope `Intervals`. The
+outer `&` is interval intersection — the time-window overlap. The result fires
+only when both conditions hold in the same recording, regardless of which entities
+triggered each side. `.entity_condition()` requires the series to declare an
+`entity_key`; without one it raises (per-entity coherence is meaningless without
+an entity identity).
+
+When you're authoring a single predicate (no cross-entity correlation), you don't
+need `.entity_condition()`. The `BasicEvent` and `EntityEvent` constructors
+finalize the predicate for you. The explicit call is only necessary when the
+*outer* `&` is across two independently-authored predicates.
+
+---
+
+## Time-axis alignment
+
+A cross-series query compares timestamps **directly, as raw integers**, so every
+series in a query (and the container metrics) must share one time axis — same unit,
+same epoch, aligned upstream at ingest. A mismatch is silently wrong, not an error.
+See the [Query Engine reference](query_engine.md), "Time-axis alignment", for the
+full precondition and the upstream levers (RLE, quantization, downsampling) that
+keep dense series tractable.
+
+---
+
+## Where else this fits
+
+The engine's role is identical across domains: schema reflection drives the
+accessor, the per-container evaluation pipeline applies the predicate, and the
+result composes with channel predicates. Only the registration differs.
+
+- **Industrial test cells — per-cycle defect inspection.** Multiple units flow
+  through one production cycle. *"Cycles where unit A failed dimensional check
+  while unit B on the adjacent line ran at high pressure"* — defect inspection
+  records keyed by station, with channel composition against the line's pressure
+  sensor.
+
+- **Motorsport telemetry — per-lap event logs.** Multiple drivers in one race
+  session. *"Laps where driver A took sector 3 within 0.2s of fastest while
+  driver B was on a slow lap"* — lap events keyed by driver, with per-driver
+  event materialization.
+
+- **Fleet diagnostics — per-DTC occurrences.** Multiple ECUs reporting faults
+  during one drive. *"Drives where the engine ECU raised an emissions DTC while
+  the transmission ECU raised a torque-converter DTC within the same 30-second
+  window"* — DTC records keyed by ECU, cross-entity correlation across ECUs.
+
+The pattern repeats. Customers whose primary data is entity-keyed (a labeling
+team, a defect tracker, a fleet diagnostics archive) can use Impulse end-to-end
+without channel data — the recording is still the unit of partitioning, but the
+channels table can be empty.
+
+---
+
+## Technical implementation
+
+A series is a frozen dataclass holding the Spark schema, the session/signal role
+columns, the time-axis shape (point-in-time **or** RLE), and an optional
+`entity_key`. Registration on the `MeasurementDB` stores it alongside a
+`source_factory` that produces the backing `DataFrame` per solve. Authoring-time
+lookups (`db.query.series(name)` → `SeriesAccessor`) and execution-time loads (the
+solver calls the factory) reach the same registry.
+
+Predicates are authored through `SeriesAccessor`. Each non-structural column
+returns a typed proxy whose operators build a `_PartialPredicate` — a fusible
+per-row predicate against the series. Same-series `&` / `|` between partials fuse
+the clauses into a single row-level callable; cross-series or series-plus-channel
+composition finalizes each partial and falls through to the standard interval
+algebra.
+
+`.entity_condition()` finalizes a partial as an entity-scoped `SeriesSelector`, a
+regular `TimeSeriesExpression` leaf whose `leaf_kind` is the series name. The
+channel-side filter pipeline only walks selectors with `leaf_kind == "channel"`,
+so series leaves never reach the channel-tag / channel-metric stages. A partial
+finalized without `.entity_condition()` (the default, including the `BasicEvent`
+auto-finalize path) is a presence leaf — "does this hold anywhere?".
+
+At evaluation time, a point-in-time series synthesizes each row's interval as
+`[timestamp, next_tick)` where `next_tick` is the next distinct timestamp in that
+row's `(session, signal)` frame list, with the final frame closing at the
+session's stop timestamp (`SolverConfig.container_stop_ts_col`, default
+`"stop_ts"`). An RLE series uses its row intervals directly.
+
+For a cross-series query the engine does not co-locate raw rows. Each series is
+**reduced in a distributed Spark stage** — grouped by `(session, signal, entity)`,
+so each group is one entity's rows and stays small — to the per-leaf interval sets
+its predicates produce (point-in-time `tend` is precomputed in Spark first). A
+single binary cogroup (one Spark co-partitioned join) then brings the reduced
+interval sets and the channel rows together per container. Because every series leaf is interval-valued (predicates
+only, no aggregations), this reduction carries no information loss. `EntityEvent`
+runs the same machinery and emits one fact row per matching window per entity, the
+entity's identity serialized into `entity_key`.
+
+Scalar channels are untouched. Channel-only queries continue on the existing fast
+path; the series registry is consulted only when a query's selections include
+series leaves.

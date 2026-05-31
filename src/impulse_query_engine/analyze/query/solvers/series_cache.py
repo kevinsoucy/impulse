@@ -41,3 +41,134 @@ class SeriesCache(ABC):
             The loaded sample series object.
         """
         pass
+
+    def get(self, series_name: str) -> pd.DataFrame:
+        """Return the per-container DataFrame for a registered series.
+
+        Default returns an empty DataFrame so dtype probing through
+        ``EmptyTimeSeriesCache`` and channel-only caches doesn't blow up on
+        expressions that reference a series leaf. Concrete caches that
+        carry series data (``MultiSeriesCache``) override this.
+        """
+        return pd.DataFrame()
+
+    # ------------------------------------------------------------------
+    # Pre-reduced interval lookups
+    # ------------------------------------------------------------------
+    #
+    # When a Spark per-entity reduction stage runs ahead of the cogroup, the
+    # per-container worker no longer holds a series' raw rows — it holds the
+    # already-synthesized interval sets, keyed by each leaf's stable
+    # ``_reduce_key``. ``SeriesSelector.build`` / ``entity_intervals`` consult
+    # these first and only fall back to raw-frame synthesis when a cache returns
+    # ``None`` (the default — every non-reduced cache path is unchanged).
+
+    def reduced_presence(self, leaf) -> "object | None":
+        """Pre-reduced presence ``Intervals`` for *leaf*, or ``None`` if this
+        cache carries no reduction for it (fall back to raw-frame synthesis)."""
+        return None
+
+    def reduced_entities(self, leaf) -> "dict | None":
+        """Pre-reduced ``{(signal, entity): Intervals}`` for an entity-scoped
+        *leaf*, or ``None`` if this cache carries no reduction for it."""
+        return None
+
+
+class MultiSeriesCache(SeriesCache):
+    """Cache that holds one pandas DataFrame per registered series.
+
+    This is the reference implementation of series-leaf resolution: it carries a
+    series' raw per-container rows so ``SeriesSelector.build`` can synthesize
+    intervals directly from them (``cache.get(series_name)``). The production
+    cogroup does **not** take this path — it reduces each series to interval sets
+    in a distributed Spark stage and resolves leaves via
+    ``reduced_presence`` / ``reduced_entities`` (see :class:`CombinedSeriesCache`);
+    the integration tests assert that path is result-identical to building from
+    raw frames here. As the cache backing that raw-frame oracle, this class is
+    exercised by the surface/authoring unit tests, not the live report pipeline.
+
+    ``resolve`` / ``load_blob`` are not the access path for series leaves
+    and return empty values; channel leaves go through their own cache
+    implementation.
+    """
+
+    def __init__(
+        self,
+        series: dict[str, pd.DataFrame] | None = None,
+        *,
+        container_stop_ts: float | None = None,
+    ):
+        self._series: dict[str, pd.DataFrame] = dict(series) if series else {}
+        # container_stop_ts is read by SeriesSelector.build to close the
+        # last row of each entity; without it, the last row collapses to a
+        # zero-length interval and drops out of the result.
+        self.container_stop_ts = container_stop_ts
+
+    def get(self, series_name: str) -> pd.DataFrame:
+        return self._series.get(series_name, pd.DataFrame())
+
+    def put(self, series_name: str, df: pd.DataFrame) -> None:
+        self._series[series_name] = df
+
+    def resolve(self, selection) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def load_blob(self, mid, cid) -> SampleSeries:
+        return SampleSeries.empty()
+
+
+class CombinedSeriesCache(SeriesCache):
+    """Resolve channel leaves *and* registered-series leaves from one cache.
+
+    In the cogroup path a container's rows arrive from two places: the channels
+    table (wrapped by a per-solver channel cache — ``DeltaTimeSeriesCache``,
+    ``KVSTimeSeriesCache``, …) and one or more registered series (one pandas
+    frame each). A single expression may reference both kinds of leaf, but
+    ``selection.build`` takes one cache. This cache routes by access path:
+
+    - ``resolve`` / ``load_blob`` (channel leaves) delegate to the channel cache;
+    - ``get(series_name)`` (registered-series leaves) reads the per-series frame.
+
+    A series with no rows for this container yields an empty frame, so a
+    conjunction over it correctly does not fire (rather than raising).
+    """
+
+    def __init__(
+        self,
+        channel_cache: SeriesCache,
+        series: dict[str, pd.DataFrame] | None = None,
+        *,
+        container_stop_ts: float | None = None,
+        reduced_presence: dict | None = None,
+        reduced_entities: dict | None = None,
+    ):
+        self._channel_cache = channel_cache
+        self._series: dict[str, pd.DataFrame] = dict(series) if series else {}
+        # Read by SeriesSelector.build to close the last row of each entity;
+        # without it the last row collapses to a zero-length interval.
+        self.container_stop_ts = container_stop_ts
+        # Pre-reduced interval sets keyed by leaf ``_reduce_key``. When
+        # present, SeriesSelector short-circuits to these instead of synthesizing
+        # from raw frames. Empty/None means "no reduction" → raw-frame path.
+        self._reduced_presence: dict = reduced_presence or {}
+        self._reduced_entities: dict = reduced_entities or {}
+
+    def resolve(self, selection) -> pd.DataFrame:
+        return self._channel_cache.resolve(selection)
+
+    def load_blob(self, mid, cid) -> SampleSeries:
+        return self._channel_cache.load_blob(mid, cid)
+
+    def get(self, series_name: str) -> pd.DataFrame:
+        return self._series.get(series_name, pd.DataFrame())
+
+    def put(self, series_name: str, df: pd.DataFrame) -> None:
+        self._series[series_name] = df
+
+    def reduced_presence(self, leaf):
+        key = getattr(leaf, "_reduce_key", None)
+        return self._reduced_presence.get(key) if key is not None else None
+
+    def reduced_entities(self, leaf):
+        key = getattr(leaf, "_reduce_key", None)
+        return self._reduced_entities.get(key) if key is not None else None

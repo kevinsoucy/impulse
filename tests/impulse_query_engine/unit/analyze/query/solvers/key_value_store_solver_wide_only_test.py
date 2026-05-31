@@ -1,11 +1,11 @@
 # pylint: disable=missing-function-docstring
 """
-Tests for KVSTimeSeriesCache, KeyValueStoreSolver._solve_udf, and
+Tests for KVSTimeSeriesCache, the hoisted grouped-map UDF body, and
 KeyValueStoreSolver's wide-only data model (no container_tags_table).
 
 Covers:
 - KVSTimeSeriesCache with default and custom column configs (via col_map)
-- KeyValueStoreSolver._solve_udf with col_map
+- The grouped-map UDF body (QuerySolver._grouped_map_solve_udf) with col_map
 - KeyValueStoreSolver.filter_channel_metrics / solve end-to-end with
   the wide-only data model via the basic_narrow_db fixture
 - SolverConfig col_map and property invariants
@@ -23,7 +23,6 @@ from impulse_query_engine.analyze.query.solvers.solver_config import (
     TableConfig,
 )
 from impulse_query_engine.measurement_db import MeasurementDB
-from tests.conftest import basic_narrow_db, spark
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,7 +131,7 @@ class TestKVSTimeSeriesCache:
 
 
 class TestKeyValueStoreSolverUDF:
-    """Unit tests for KeyValueStoreSolver._solve_udf with col_map."""
+    """Unit tests for the hoisted grouped-map UDF body with col_map."""
 
     def test_default_config_result_key(self):
         """UDF result DataFrame should have 'container_id' column with default col_map."""
@@ -151,8 +150,8 @@ class TestKeyValueStoreSolverUDF:
             def serialize(self):
                 return self._v
 
-        result = KeyValueStoreSolver._solve_udf(
-            pdf, selections=[_MockSelection()], col_map=DEFAULT_COL_MAP
+        result = KeyValueStoreSolver._grouped_map_solve_udf(
+            pdf, selections=[_MockSelection()], col_map=DEFAULT_COL_MAP, cache_cls=KVSTimeSeriesCache
         )
         assert "container_id" in result.columns
         assert result["container_id"].iloc[0] == pdf["container_id"].iloc[0]
@@ -176,8 +175,8 @@ class TestKeyValueStoreSolverUDF:
             def serialize(self):
                 return self._v
 
-        result = KeyValueStoreSolver._solve_udf(
-            pdf, selections=[_MockSelection()], col_map=CUSTOM_COL_MAP
+        result = KeyValueStoreSolver._grouped_map_solve_udf(
+            pdf, selections=[_MockSelection()], col_map=CUSTOM_COL_MAP, cache_cls=KVSTimeSeriesCache
         )
         assert "meas_id" in result.columns
         assert "container_id" not in result.columns

@@ -68,6 +68,49 @@ for details.
 your config entirely, the engine runs with `KeyValueStoreSolver` and
 `data_type = "RLE"`.
 
+## Time-axis alignment (precondition for cross-series queries)
+
+When a query spans more than one series — for example correlating
+`object_tracks` with `traffic_signs`, or a registered series with channels —
+the engine compares their timestamps **directly, as raw integers**. It never
+resamples a series to a common frequency and never converts between time units
+at query time. This keeps evaluation at native resolution and avoids hidden
+interpolation, but it carries one hard precondition:
+
+> **Every series in a query must share one time axis: the same unit and the
+> same epoch (zero point).** This includes the container's `stop_ts` in
+> `container_metrics`, which the engine uses to close the final frame of a
+> point-in-time series at session end.
+
+The unit itself is unconstrained — microseconds, milliseconds, nanoseconds, or
+any other integer base — as long as it is *identical* across every series and
+the container metrics in the query. The engine cannot detect a mismatch: two
+series in different units are both just `LongType` columns, so a misaligned
+series produces silently wrong intervals rather than an error. Getting the axes
+onto a common base is an **upstream responsibility**, done once at ingest /
+silver before the series is registered, not a runtime conversion.
+
+### Keeping dense series tractable
+
+The same upstream prep step is also where you make dense series (e.g. per-frame
+ADAS object detections — hundreds of objects per frame at 10+ Hz) scale. A query
+evaluates one session's rows for a series together, so a session that is dense
+enough to not fit in memory will fail. Shape the data at ingest with three
+levers that compound:
+
+- **Run-length encoding (RLE)** — store one row per `[tstart, tend)` segment
+  during which a value holds, rather than one row per sample. For a value that
+  changes rarely this is a 100–1000× row reduction.
+- **Value quantization** — round continuous payloads (e.g. `distance_m`) to the
+  coarsest precision the query actually needs. Adjacent frames then share a
+  value, so RLE runs coalesce into longer segments — quantize too finely and you
+  defeat RLE.
+- **Downsampling** — drop the sample rate where the question tolerates it (a
+  "close cyclist" window does not need 100 Hz). This is a linear row reduction.
+
+These are data-model decisions, not engine settings: they belong in the
+pipeline that produces the silver tables the series reads from.
+
 ## Configuring the solver
 
 Solver selection and tuning live under the `query_engine` section of your

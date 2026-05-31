@@ -243,13 +243,21 @@ class UnityCatalogSink(Sink):
         merge_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
 
         target = self._resolve_delta_table(df.sparkSession, uri)
-        (
+        builder = (
             target.alias("target")
             .merge(df.alias("source"), merge_condition)
             .whenMatchedUpdateAll()
             .whenNotMatchedInsertAll()
-            .execute()
         )
+        if overwrite_schema:
+            # Evolve the target schema so an additive nullable column added in a
+            # later release (e.g. `entity_key` in 2.0) is appended to a
+            # pre-existing table instead of raising a MERGE schema mismatch. This
+            # mirrors the replaceWhere path, which already evolves the schema via
+            # overwriteSchema, and is what keeps a 1.0 -> 2.0 upgrade non-breaking
+            # for reports persisted through the MERGE (unchanged-definition) path.
+            builder = builder.withSchemaEvolution()
+        builder.execute()
 
     def replace_by_ids(
         self,

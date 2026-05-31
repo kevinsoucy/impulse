@@ -71,6 +71,43 @@ def test_merge_overlaps3():
     nptest.assert_array_equal([4, 4], result.tends)
 
 
+def test_merge_overlaps_contained_interval_keeps_enclosing_end():
+    # A later interval contained in an earlier one must not truncate the run end
+    # to the contained interval's end. starts sorted, ends non-monotone.
+    intvls = Intervals([100, 300], [500, 400], merge_overlaps=False)
+    result = intvls.merge_overlaps()
+    nptest.assert_array_equal([100], result.tstarts)
+    nptest.assert_array_equal([500], result.tends)
+
+
+def test_merge_overlaps_middle_contained_run_then_disjoint():
+    # [0,100) ⊃ [10,20), then a disjoint [200,300). The first run must close at
+    # 100 (the running max), not 20 (the last interval's end), and the gap to
+    # [200,300) must be preserved.
+    intvls = Intervals([0, 10, 200], [100, 20, 300], merge_overlaps=False)
+    result = intvls.merge_overlaps()
+    nptest.assert_array_equal([0, 200], result.tstarts)
+    nptest.assert_array_equal([100, 300], result.tends)
+
+
+def test_or_with_contained_interval_returns_enclosing():
+    # __or__ inherits the merge_overlaps fix: A | B where B is contained in A.
+    a = Intervals([100.0], [500.0])
+    b = Intervals([300.0], [400.0])
+    result = a | b
+    nptest.assert_array_equal([100], result.tstarts)
+    nptest.assert_array_equal([500], result.tends)
+
+
+def test_and_with_contained_interval_unaffected():
+    # Intersection was always correct; guard against a regression from the union fix.
+    a = Intervals([100.0], [500.0])
+    b = Intervals([300.0], [400.0])
+    result = a & b
+    nptest.assert_array_equal([300], result.tstarts)
+    nptest.assert_array_equal([400], result.tends)
+
+
 def test_starts_empty():
     intvls = Intervals.empty()
     assert len(intvls.starts()) == 0
@@ -88,7 +125,7 @@ def test_ends_empty():
 
 def test_ends():
     intvls = Intervals([0, 1], [1, 2])
-    nptest.assert_array_equal([0, 1], intvls.starts())
+    nptest.assert_array_equal([1, 2], intvls.ends())
 
 
 def test_start_time_empty():
@@ -290,14 +327,6 @@ def test_or():
 
 
 def test_or_nooverlap():
-    intvls1 = Intervals([0, 1, 2], [1, 2, 3])
-    intvls2 = Intervals([4], [5])
-    result = intvls1 | intvls2
-    nptest.assert_array_equal([0, 4], result.tstarts)
-    nptest.assert_array_equal([3, 5], result.tends)
-
-
-def test_or_nooverlap2():
     intvls1 = Intervals([0, 1, 2], [1, 2, 3])
     intvls2 = Intervals([4], [5])
     result = intvls1 | intvls2
@@ -841,7 +870,7 @@ def test_debounce_second_long_interval_starts_new_event():
 
 def test_debounce_ascii_example_scenario():
     """
-    Encodes the ASCII example from implementation_plan.md (d=3).
+    Encodes a worked debounce example (d=3).
 
     Raw signal intervals:
       [8,10), [12,14), [16,31), [35,36), [40,44), [46,50), [52,54), [56,59)

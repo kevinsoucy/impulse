@@ -32,6 +32,7 @@ from impulse_reporting.core.report_utils import (
     split_by_hash_change,
 )
 from impulse_reporting.events.container_event import ContainerEvent
+from impulse_reporting.events.entity_event import EntityEvent
 from impulse_reporting.events.event import Event
 from impulse_reporting.events.event_types import EventType
 from impulse_reporting.incremental.container_detector import ContainerUpsertDetector
@@ -893,12 +894,14 @@ class Report:
             )
         )
 
-        # Collect all solvable expressions (exclude ContainerEvent)
+        # Collect all solvable expressions. ContainerEvent and EntityEvent are
+        # excluded: each has its own determine_events path (container-span rows /
+        # entity-attributed rows) and does not ride the centralized presence solve.
         all_changed_expressions = collect_solvable_expressions(
-            changed_events_by_type, EventType, exclude_cls=ContainerEvent
+            changed_events_by_type, EventType, exclude_cls=(ContainerEvent, EntityEvent)
         ) + collect_solvable_expressions(changed_aggs_by_type, AggregationType)
         all_unchanged_expressions = collect_solvable_expressions(
-            unchanged_events_by_type, EventType, exclude_cls=ContainerEvent
+            unchanged_events_by_type, EventType, exclude_cls=(ContainerEvent, EntityEvent)
         ) + collect_solvable_expressions(unchanged_aggs_by_type, AggregationType)
 
         # Centralized solve
@@ -919,6 +922,7 @@ class Report:
             self.solver,
             None,
             ContainerEvent,
+            EntityEvent,
         )
         unchanged_event_dfs = dispatch_events(
             self.spark,
@@ -929,6 +933,7 @@ class Report:
             self.solver,
             pre_filtered_containers_df,
             ContainerEvent,
+            EntityEvent,
         )
 
         # Merge event results into {type: {"changed": df, "unchanged": df}}

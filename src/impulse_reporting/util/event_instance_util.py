@@ -17,6 +17,7 @@ def generate_event_instance_id_column(
     event_name_col: str = "event_name",
     start_ts_col: str = "start_ts",
     end_ts_col: str = "end_ts",
+    entity_key_col: str | None = None,
 ) -> Column:
     """
     Generate an event_instance_id column.
@@ -40,6 +41,11 @@ def generate_event_instance_id_column(
         Name of the start timestamp column, defaults to "start_ts".
     end_ts_col : str, optional
         Name of the end timestamp column, defaults to "end_ts".
+    entity_key_col : str or None, optional
+        Name of the entity_key column. When set (the ``EntityEvent`` path) it is
+        folded into the hash so two distinct entities matching the *same* window
+        of the *same* event get distinct instance ids. When ``None`` (default)
+        the hash is unchanged, preserving every existing caller.
 
     Returns
     -------
@@ -51,12 +57,12 @@ def generate_event_instance_id_column(
     if event_type is ContainerEvent:
         return f.crc32(f.col(container_id_col).cast("string"))
 
-    return f.crc32(
-        f.concat_ws(
-            "::",
-            f.col(container_id_col),
-            f.col(event_name_col),
-            f.col(start_ts_col),
-            f.col(end_ts_col),
-        )
-    )
+    parts = [
+        f.col(container_id_col),
+        f.col(event_name_col),
+        f.col(start_ts_col),
+        f.col(end_ts_col),
+    ]
+    if entity_key_col is not None:
+        parts.append(f.coalesce(f.col(entity_key_col), f.lit("")))
+    return f.crc32(f.concat_ws("::", *parts))

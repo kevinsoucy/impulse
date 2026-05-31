@@ -47,6 +47,14 @@ class BasicEvent(Event):
             Key-value metadata for the event (e.g. limit_type, limit_direction).
         """
         Event.__init__(self, name)
+        # Auto-finalize a _PartialPredicate as a presence leaf so single-predicate
+        # events don't need explicit finalization. A BasicEvent is session-scoped
+        # (presence), so it never carries per-entity scope; an EntityEvent
+        # overrides this to finalize via .entity_condition().
+        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
+
+        if isinstance(expr, _PartialPredicate):
+            expr = expr._finalize_presence()
         self.expression = expr.alias(name)
         self.description = desc
         self.required_channels = required_channels
@@ -88,25 +96,31 @@ class BasicEvent(Event):
         """
         return "BASIC_EVENT"
 
+    def _definition_str(self) -> str:
+        """The string whose hash defines this event's computation.
+
+        For a basic event only the expression affects results. Subclasses that
+        carry additional result-affecting parameters extend this so those
+        parameters participate in the definition hash and a redefinition is
+        detected as a change.
+        """
+        return self.get_expression_str()
+
     def determine_definition_hash(self) -> int:
         """
-        Calculate definition hash for basic event.
+        Calculate definition hash for the event.
 
-        Only includes the expression (computation logic), which is the
-        only attribute that affects the event results.
-
-        Excludes: name, description, required_channels, report_id
+        Hashes :meth:`_definition_str` — the expression plus any subclass
+        parameters that affect results. Excludes name, description,
+        required_channels, report_id.
 
         Returns
         -------
         int
             Hash value representing the computation definition.
         """
-        # Only the expression affects results
-        hash_input = self.get_expression_str()
-
         # Use SHA-256 and return as int (truncated to fit LongType)
-        hash_bytes = hashlib.sha256(hash_input.encode()).digest()
+        hash_bytes = hashlib.sha256(self._definition_str().encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
 
     def as_dict(self) -> dict:
@@ -206,6 +220,9 @@ class BasicEvent(Event):
                 "event_id",
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
+            # BasicEvent has no per-entity scope; entity_key is NULL for these rows.
+            # EntityEvent overrides the materialization path to populate it.
+            .withColumn("entity_key", f.lit(None).cast("string"))
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
             .where(f.col("start_ts") < f.col("end_ts"))  # Ensure valid time intervals
         )

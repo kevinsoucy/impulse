@@ -1,5 +1,12 @@
 import os
+import sys
 from unittest.mock import create_autospec
+
+# Ensure Spark workers use the same Python interpreter as the driver.
+# Without this, local mode picks up whatever 'python' resolves to on PATH,
+# which may differ from the venv Python running pytest.
+os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
 
 import numpy as np
 import pandas as pd
@@ -22,7 +29,7 @@ def spark() -> SparkSession:
             "org.apache.spark.sql.delta.catalog.DeltaCatalog",
         )
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.databricks.delta.retentionDurationCheck.enabled ", "false")
+        .config("spark.databricks.delta.retentionDurationCheck.enabled", "false")
         .config("spark.shuffle.partitions", 1)
     ).getOrCreate()
     spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver")
@@ -40,7 +47,7 @@ def mock_workspace_client():
 
 
 @pytest.fixture
-def basic_narrow_db(spark, mock_workspace_client) -> MeasurementDB:
+def basic_narrow_db(spark, ensure_silver_basic, mock_workspace_client) -> MeasurementDB:
     """Return a basic narrow MeasurementDB instance with preloaded data."""
     tables = {}
     tables["container_metrics"] = spark.read.table("spark_catalog.silver.container_metrics")
@@ -113,16 +120,24 @@ def setup_narrow_db(spark):
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_basic_db(spark):
-    """Setup necessary silver tables."""
+# The basic silver tables are bootstrapped once per session with fresh CSV data,
+# then re-ensured before every test. Long full-suite runs intermittently lose the
+# managed-table registrations for `spark_catalog.silver.*` (the shared embedded
+# metastore degrades under thousands of DDL ops), which surfaces late as
+# DELTA_TABLE_NOT_FOUND in the heavy Delta integration/aggregation readers. Recreating
+# any that have vanished — create-if-missing, never drop — keeps those readers green.
+_SILVER_BASIC_TABLES = (
+    "container_metrics",
+    "container_metrics_inc_1",
+    "container_metrics_inc_1_2",
+    "channel_metrics",
+    "channels",
+)
 
-    # delete all existing tables in silver schema
-    silver_tables = spark.sql("SHOW TABLES IN spark_catalog.silver").collect()
 
-    for table in silver_tables:
-        table_name = table.tableName
-        spark.sql(f"DROP TABLE IF EXISTS spark_catalog.silver.{table_name} PURGE")
+def _write_silver_basic(spark):
+    """(Re)create the basic silver tables from CSV. Overwrites in place; never drops."""
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver")
 
     base_path = os.path.dirname(os.path.abspath(__file__))
     base_path = base_path[: base_path.find("tests")]
@@ -149,6 +164,28 @@ def setup_basic_db(spark):
         "spark_catalog.silver.channel_metrics"
     )
     channels.write.format("delta").mode("overwrite").saveAsTable("spark_catalog.silver.channels")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_basic_db(spark):
+    """Bootstrap the basic silver tables once per session with fresh CSV data."""
+    _write_silver_basic(spark)
+
+
+@pytest.fixture(autouse=True)
+def ensure_silver_basic(spark, setup_basic_db):
+    """Recreate any basic silver table that vanished mid-run before each test.
+
+    The fast path is a metadata-only existence check per table; the write only fires
+    when the shared metastore has dropped a registration during a long run.
+    """
+    missing = [
+        t
+        for t in _SILVER_BASIC_TABLES
+        if not spark.catalog.tableExists(f"spark_catalog.silver.{t}")
+    ]
+    if missing:
+        _write_silver_basic(spark)
 
 
 @pytest.fixture(scope="function", autouse=True)

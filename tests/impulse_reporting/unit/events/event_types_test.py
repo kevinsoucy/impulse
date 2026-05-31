@@ -96,7 +96,12 @@ def test_unsupported_event_type():
 def test_get_any_for_fact_table():
     """Test that get_any_for_fact_table returns a valid EventType."""
     et = EventType.get_any_for_fact_table("event_instance_fact")
-    assert et in (EventType.BASIC_EVENT, EventType.CONTAINER_EVENT)
+    assert et in (
+        EventType.ENTITY_EVENT,
+        EventType.BASIC_EVENT,
+        EventType.CONTAINER_EVENT,
+        EventType.SEQUENCE_OF_EVENTS,
+    )
 
 
 def test_get_any_for_fact_table_unknown():
@@ -108,7 +113,12 @@ def test_get_any_for_fact_table_unknown():
 def test_get_any_for_dimension_table():
     """Test that get_any_for_dimension_table returns a valid EventType."""
     et = EventType.get_any_for_dimension_table("event_dimension")
-    assert et in (EventType.BASIC_EVENT, EventType.CONTAINER_EVENT)
+    assert et in (
+        EventType.ENTITY_EVENT,
+        EventType.BASIC_EVENT,
+        EventType.CONTAINER_EVENT,
+        EventType.SEQUENCE_OF_EVENTS,
+    )
     assert et.get_dimension_table_name() == "event_dimension"
 
 

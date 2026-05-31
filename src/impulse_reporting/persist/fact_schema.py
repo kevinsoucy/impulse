@@ -40,10 +40,18 @@ HISTOGRAM2D_FACT_SCHEMA = StructType(
 EVENT_INSTANCE_FACT_SCHEMA = StructType(
     [
         StructField("container_id", IntegerType(), False),
-        StructField("event_instance_id", IntegerType(), False),
+        # crc32 of (container_id, event_name, start_ts, end_ts[, entity_key]) is in
+        # [0, 2**32 - 1], which overflows int32. LongType matches both the runtime
+        # column (Spark crc32 yields bigint) and STATS_AGGREGATOR_FACT_SCHEMA, which
+        # already stores the same crc32-derived id as LongType.
+        StructField("event_instance_id", LongType(), False),
         StructField("event_id", IntegerType(), False),
         StructField("start_ts", LongType(), False),
         StructField("end_ts", LongType(), False),
+        # NULL for BasicEvent rows and any event without per-entity scope.
+        # For EntityEvent rows: the matched entities as a nested JSON map,
+        # ``{table_name: {signal: [entity_key, ...]}}`` (see entity_event.py).
+        StructField("entity_key", StringType(), True),
     ]
 )
 

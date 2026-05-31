@@ -1,9 +1,17 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING
+
 from databricks.sdk import WorkspaceClient
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 
 from impulse_query_engine import __version__
 from impulse_query_engine.telemetry import verify_workspace_client
 from .analyze.query.query_builder import QueryBuilder
+
+if TYPE_CHECKING:
+    from impulse_query_engine.surfaces.series import Series
 
 
 class MeasurementDBConfig:
@@ -67,6 +75,100 @@ class MeasurementDB:
     def __init__(self, config: MeasurementDBConfig, ws: WorkspaceClient):
         self.config = config
         self.ws = verify_workspace_client(ws, "databricks-impulse", __version__)
+        # name -> (Series definition, source_factory). The definition is needed
+        # at *authoring* time (query.series(name) builds a typed accessor from the
+        # schema, before any solver is chosen); the source_factory is needed at
+        # *execution* time (the solver loads the backing DataFrame per solve).
+        # Both live here so QueryBuilder (authoring) and the solver (execution)
+        # reach the same registry. Built-in channels are not registered here —
+        # their column roles live in SolverConfig, so the solver contributes the
+        # channels Series into its effective registry at solve time.
+        self._series_registry: dict[
+            str, tuple["Series", Callable[[SparkSession], DataFrame]]
+        ] = {}
+
+    def register_series(
+        self,
+        series: "Series",
+        source_factory: Callable[[SparkSession], DataFrame],
+        *,
+        valid_signals: "Iterable[object] | None" = None,
+        spark: SparkSession | None = None,
+    ) -> None:
+        """Register a tabular series definition and its DataFrame factory.
+
+        Parameters
+        ----------
+        series : Series
+            The declarative series definition. Must carry a resolved ``schema``
+            so ``query.series(name)`` can build a typed accessor.
+        source_factory : Callable[[SparkSession], DataFrame]
+            Called per solve to produce the Spark DataFrame backing this series.
+            The DataFrame must include the series' ``session_col`` so the cogroup
+            can partition on it.
+        valid_signals : Iterable, optional
+            **Opt-in** signal-metadata validation. When supplied, the set
+            of known ``signal_col`` values for this series. Registration then reads
+            the source DataFrame's distinct ``signal_col`` values and raises if any
+            are **not** in *valid_signals* — fail-fast, so a typo'd or unregistered
+            signal cannot be silently dropped at query time (queries filter by
+            signal). When omitted, registration requires no signal metadata at all
+            (the default; signal values live in the data and are queried directly).
+        spark : SparkSession, optional
+            Required only when *valid_signals* is given — used to materialize the
+            source DataFrame for validation. Ignored otherwise.
+
+        Raises
+        ------
+        ValueError
+            If the series name is already registered; if *valid_signals* is given
+            without *spark*; or if the data carries signal value(s) absent from
+            *valid_signals* (the message names the series and the unknown signals).
+        """
+        if series.name in self._series_registry:
+            raise ValueError(f"Series {series.name!r} is already registered.")
+        if valid_signals is not None:
+            self._validate_signal_values(series, source_factory, valid_signals, spark)
+        self._series_registry[series.name] = (series, source_factory)
+
+    @staticmethod
+    def _validate_signal_values(
+        series: "Series",
+        source_factory: Callable[[SparkSession], DataFrame],
+        valid_signals: "Iterable[object]",
+        spark: SparkSession | None,
+    ) -> None:
+        """Fail-fast check that every ``signal_col`` value in the source data is a
+        known signal. See :meth:`register_series`."""
+        if spark is None:
+            raise ValueError(
+                f"register_series({series.name!r}, valid_signals=...) needs a spark "
+                "session to read the source data for signal-metadata validation."
+            )
+        allowed = set(valid_signals)
+        df = source_factory(spark)
+        present = {row[0] for row in df.select(series.signal_col).distinct().collect()}
+        unknown = present - allowed
+        if unknown:
+            raise ValueError(
+                f"Series {series.name!r} carries signal value(s) "
+                f"{sorted(map(str, unknown))} on column {series.signal_col!r} that are "
+                f"not in the provided signal metadata {sorted(map(str, allowed))}; "
+                "they would be silently dropped at query time."
+            )
+
+    def registered_series(self) -> dict[str, "Series"]:
+        """Snapshot of registered series definitions, keyed by name."""
+        return {name: pair[0] for name, pair in self._series_registry.items()}
+
+    def series_source(self, name: str) -> Callable[[SparkSession], DataFrame]:
+        """Return the ``source_factory`` for a registered series.
+
+        Raises ``KeyError`` naming the series if it is not registered.
+        """
+        if name not in self._series_registry:
+            raise KeyError(f"Series {name!r} is not registered on this MeasurementDB.")
+        return self._series_registry[name][1]
 
     @property
     def query(self):
