@@ -1,10 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 01 — Ingest: load source-dataset into the LakeVision silver tables
+# MAGIC # 01 — Ingest: load source-dataset into the ADAS silver tables
 # MAGIC
 # MAGIC The first stage of the demo. Five steps, run in sequence:
 # MAGIC
-# MAGIC 1. **Provision** — schemas + volumes + empty LakeVision Delta tables (idempotent).
+# MAGIC 1. **Provision** — schemas + volumes + empty ADAS Delta tables (idempotent).
 # MAGIC 2. **Metadata** — adapter writes `container_tags`, `container_metrics`, `channel_tags` rows.
 # MAGIC 3. **Scalars** — adapter populates `channels` (and `channel_metrics` is derived from it).
 # MAGIC 4. **Perception channels** — adapter registers per-frame camera + LiDAR file paths.
@@ -75,7 +75,7 @@ for v in cfg.volumes_to_create():
 
 # COMMAND ----------
 
-# MAGIC %md ### Empty LakeVision tables (from `impulse_query_engine.schema`)
+# MAGIC %md ### Empty ADAS tables (from `impulse_query_engine.schema`)
 
 # COMMAND ----------
 
@@ -90,7 +90,7 @@ _create_empty_table(cfg.t_channel_tags, core_schema.CHANNEL_TAGS)
 _create_empty_table(cfg.t_channel_metrics, core_schema.CHANNEL_METRICS)
 _create_empty_table(cfg.t_channels, core_schema.CHANNELS_SCHEMA)
 
-# LakeVision silver.
+# ADAS silver.
 _create_empty_table(cfg.t_perception_channels, PERCEPTION_CHANNELS)
 # channel_value_labels intentionally omitted — the demo never reads it.
 

@@ -6,10 +6,10 @@ demo only navigates metadata, and the geometry it needs is in `lib/geometry.py`.
 
 The token-based API is verbose — every navigation step is a `.get()` by token.
 This module hides that behind plain Python iterators returning typed dataclasses
-so notebook code stays focused on the LakeVision data model rather than the
+so notebook code stays focused on the ADAS data model rather than the
 dataset's quirks.
 
-NuScenes vocab → LakeVision vocab mapping:
+NuScenes vocab → ADAS vocab mapping:
   scene        → container (one container_id per scene)
   sample       → keyframe @ 2 Hz; sample.timestamp aligns to Impulse's microsecond clock
   sample_data  → per-sensor file at non-keyframe rates (cameras ~12 Hz, LiDAR ~20 Hz)
@@ -66,7 +66,7 @@ DERIVED_CHANNEL_IDS: dict[str, int] = {
 
 @dataclass(frozen=True)
 class Scene:
-    """A NuScenes scene = one LakeVision container."""
+    """A NuScenes scene = one ADAS container."""
     container_id: int  # stable integer hash of the scene token
     scene_token: str
     name: str
@@ -131,7 +131,7 @@ class Annotation:
 # ── Category simplification ──────────────────────────────────────────────────
 
 def simplify_category(nuscenes_category: str) -> str:
-    """Reduce NuScenes hierarchical category to a single LakeVision detection_class."""
+    """Reduce NuScenes hierarchical category to a single ADAS detection_class."""
     parts = nuscenes_category.split(".")
     if parts[0] == "human":
         return "pedestrian"

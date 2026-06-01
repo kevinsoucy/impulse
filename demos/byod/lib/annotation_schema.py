@@ -1,4 +1,4 @@
-"""Phase 4 annotation schemas for LakeVision perception extension.
+"""Phase 4 annotation schemas for ADAS perception extension.
 
 Design principles:
 - Build Phase 4 only when a downstream consumer exists.

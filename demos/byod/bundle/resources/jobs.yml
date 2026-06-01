@@ -33,8 +33,8 @@ resources:
     # Bootstrap — table creation + metadata ingest only
     # ─────────────────────────────────────────────────────────────────────────
     bootstrap_job:
-      name: "adas — bootstrap LakeVision tables + ingest metadata"
-      description: "Runs 01_ingest with bootstrap_only=true: creates LakeVision tables from impulse_query_engine.schema and writes container_tags + channel_tags via the selected adapter. Idempotent."
+      name: "adas [${var.schema_prefix}] — bootstrap tables + ingest metadata"
+      description: "Runs 01_ingest with bootstrap_only=true: creates ADAS tables from impulse_query_engine.schema and writes container_tags + channel_tags via the selected adapter. Idempotent."
 
       environments:
         - environment_key: serverless
@@ -74,7 +74,7 @@ resources:
     # Full pipeline — 4 tasks, one per customer-narrative beat
     # ─────────────────────────────────────────────────────────────────────────
     run_all_job:
-      name: "adas — end-to-end (ingest → detect → per-event detail → visualize)"
+      name: "adas [${var.schema_prefix}] — end-to-end (ingest → detect → per-event detail → visualize)"
       description: "Runs the full demo pipeline on serverless. ~25 min on NuScenes mini, longer on other adapters/variants."
 
       environments:

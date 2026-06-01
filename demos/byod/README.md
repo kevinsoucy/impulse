@@ -3,7 +3,7 @@
 **Local verification:** demo suite 363 passed (`tests/demos/byod`, 2026-06-01).
 **Workspace E2E:** 2026-06-01 (green) — nuscenes/v1.0-mini on fevm-adas-engine-validate / adas_engine_validate_catalog.
 
-The reference demo for **how to add a new dataset to LakeVision**. Every dataset (NuScenes, A2D2, customer MDF4, …) plugs in as an *adapter*. The four pipeline notebooks (`01`–`04`) are byte-identical across adapters; the per-dataset logic lives entirely inside `adapters/<name>/`. Adding a new dataset means writing one Python package — zero notebook edits.
+The reference demo for **how to add a new dataset to ADAS**. Every dataset (NuScenes, A2D2, customer MDF4, …) plugs in as an *adapter*. The four pipeline notebooks (`01`–`04`) are byte-identical across adapters; the per-dataset logic lives entirely inside `adapters/<name>/`. Adding a new dataset means writing one Python package — zero notebook edits.
 
 > **What this proves:** every layer downstream of dataset-specific ingest works identically regardless of source. TSAL scenario search, OpenLABEL export, KPI comparison, and visualization are all generic.
 >
@@ -34,7 +34,7 @@ See `lib/adapter.py` for the canonical Protocol. Summary:
 | `scalar_source(spark)` | `01_ingest.py` (Step 3) | Return a Spark DataFrame matching `CHANNELS_SCHEMA`. Implementations: synthesize, bus-decode, MDF4-decode. |
 | `perception_paths()` | `01_ingest.py` (Step 4) | Yield `perception_channels` rows (one per camera frame / LiDAR scan). |
 | `scenes()` | `01_ingest.py` (Step 5), `03_per_event_detail.py` | List all scenes; each must expose `.container_id` and `.name`. |
-| `map_to_object_tracks(scene, min_confidence)` | `01_ingest.py` (Step 5) | Per-frame row assembly. Geometry/encoding helpers live in `lakevision.geometry`. |
+| `map_to_object_tracks(scene, min_confidence)` | `01_ingest.py` (Step 5) | Per-frame row assembly. Geometry/encoding helpers live in `adas.geometry`. |
 | `map_to_lidar_detections(scene, event_windows)` | `03_per_event_detail.py` | Phase 4 cuboids, restricted to TSAL event windows. |
 | `map_to_camera_detections(scene, event_windows)` | `03_per_event_detail.py` | 2D bbox projections, same windowing contract. |
 | `openlabel_metadata()` | `03_per_event_detail.py` | `{annotator, exporter, stream_description_prefix}` strings injected into OpenLABEL output. |
@@ -54,7 +54,7 @@ dataroot_template: "{vroot}/raw/{version}"
 
 openlabel:
   annotator: nuscenes_ground_truth
-  exporter: lakevision-demo/byod/adapters/nuscenes
+  exporter: adas-demo/byod/adapters/nuscenes
   stream_description_prefix: "NuScenes "
 
 visualize_format:
@@ -94,16 +94,12 @@ The reference adapter — proves the data model end-to-end on the public NuScene
 
 Quick start:
 - [ ] Accept the EULA at https://www.nuscenes.org/sign-up (one-time, free).
-- [ ] Server-side download from `https://www.nuscenes.org/data/v1.0-mini.tgz` into `/Volumes/<catalog>/lakevision_demo_silver/raw/v1.0-mini/` — snippet in the adapter README.
+- [ ] Server-side download from `https://www.nuscenes.org/data/v1.0-mini.tgz` into `/Volumes/<catalog>/demo_silver/raw/v1.0-mini/` — snippet in the adapter README.
 - [ ] Deploy the bundle with `databricks bundle deploy --target shared --profile <your-workspace-profile> --var "catalog=<your-catalog>"`.
 
 ### `a2d2`
 
 Audi Autonomous Driving Dataset — real bus signals (no synthesis), camera + LiDAR + 3D box annotations in the vehicle frame. The reference adapter for non-global box frames and dataset-shipped CAN bus data. See `adapters/a2d2/README.md`.
-
-### `pandaset`
-
-PandaSet from Hesai / Scale AI — cleanest license (CC BY 4.0) and dual heterogeneous LiDAR (Pandar64 spinning + PandarGT solid-state). The only adapter that emits per-physical-LiDAR rows, so notebook 04's KPI comparison can compare spinning vs. solid-state range distributions within a single adapter. See `adapters/pandaset/README.md`.
 
 ---
 
@@ -116,7 +112,7 @@ PandaSet from Hesai / Scale AI — cleanest license (CC BY 4.0) and dual heterog
    ├── config.yaml       ← dataset_versions, dataroot_template, openlabel, visualize_format
    ├── loader.py         ← thin wrapper around your dataset's SDK
    ├── scalar_source.py  ← decode bus signals or synthesize scalars
-   ├── object_tracks.py  ← per-frame row assembly (uses lakevision.geometry)
+   ├── object_tracks.py  ← per-frame row assembly (uses adas.geometry)
    ├── lidar.py          ← 3D cuboid → lidar_object_detections row assembly
    ├── camera.py         ← 3D box → camera_object_detections row assembly
    ├── ingest.py         ← container_tags / channel_tags / container_metrics writes

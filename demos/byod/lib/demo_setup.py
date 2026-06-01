@@ -23,7 +23,7 @@ _BASE_WIDGETS = (
     ("adapter",         "nuscenes",        "Adapter name (e.g. nuscenes, a2d2)"),
     ("dataset_version", "v1.0-mini",       "Adapter-specific variant"),
     ("catalog",         "main",            "UC catalog (must exist)"),
-    ("schema_prefix",   "lakevision_demo", "Schema prefix"),
+    ("schema_prefix",   "demo", "Schema prefix"),
 )
 
 

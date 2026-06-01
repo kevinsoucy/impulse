@@ -6,7 +6,7 @@ no bus stream), A2D2 publishes the real recorded ECU signals in
 
 1. **Bus signals → channels:** reads the bus_signals.json file once per scene
    and emits one `ChannelValue` per (signal, timestamp) pair, mapped through
-   `BUS_SIGNAL_TO_CHANNEL` to the canonical LakeVision channel ids.
+   `BUS_SIGNAL_TO_CHANNEL` to the canonical ADAS channel ids.
    No synthesis, no derivatives — values come straight from the recording.
 
 2. **Detection-aggregate channels:** computed exactly like NuScenes,
@@ -65,11 +65,11 @@ def _decode_bus_signals(loader: A2D2Loader, scene: Scene) -> list[ChannelValue]:
     """
     signals = loader.bus_signals_for_scene(scene)
     out: list[ChannelValue] = []
-    for raw_key, lakevision_name in BUS_SIGNAL_TO_CHANNEL.items():
+    for raw_key, adas_name in BUS_SIGNAL_TO_CHANNEL.items():
         series = signals.get(raw_key)
         if not series:
             continue
-        channel_id = DERIVED_CHANNEL_IDS[lakevision_name]
+        channel_id = DERIVED_CHANNEL_IDS[adas_name]
         sorted_series = sorted(series, key=lambda p: p[0])
         if len(sorted_series) == 1:
             ts, value = sorted_series[0]

@@ -2,7 +2,7 @@
 
 `ingest_metadata` populates `container_tags`, `container_metrics`, and
 `channel_tags` with NuScenes-specific content. The generic notebook 01 calls
-this after creating empty LakeVision tables.
+this after creating empty ADAS tables.
 
 `perception_paths` yields one dict per sensor file (camera + LiDAR; radar
 intentionally omitted from the demo's scenario-search path). The generic

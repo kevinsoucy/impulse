@@ -1,4 +1,4 @@
-"""OpenLABEL 1.0.0 JSON export from LakeVision Delta tables.
+"""OpenLABEL 1.0.0 JSON export from ADAS Delta tables.
 
 OpenLABEL is an export format, not a storage format. Annotations live in
 `lidar_object_detections`, `camera_object_detections`, and friends; this module
@@ -7,7 +7,7 @@ projects them into the nested OpenLABEL document shape that labeling tools
 
 One package per TSAL event window. Each package contains:
   - Metadata          (schema version, annotator, exporter)
-  - Coordinate systems (vehicle-iso8855 — the LakeVision vehicle frame)
+  - Coordinate systems (vehicle-iso8855 — the ADAS vehicle frame)
   - Streams           (per-sensor channel definitions for the window)
   - Objects           (UUID-keyed dict of static per-object info)
   - Frames            (timestamp-keyed dict of per-frame object_data: cuboids, file URIs)
@@ -208,7 +208,7 @@ def build_openlabel_for_event(
                 "annotator": annotator,
                 "exporter": exporter,
                 "comment": (
-                    f"Exported from LakeVision lidar_object_detections for event "
+                    f"Exported from ADAS lidar_object_detections for event "
                     f"'{event_name}' instance {event_id} "
                     f"(container {container_id}, scene {scene_name}, "
                     f"window [{start_ts_us}, {end_ts_us}])."

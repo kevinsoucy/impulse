@@ -86,7 +86,7 @@ class TestChannelValue:
 
 
 class TestBusSignalDecode:
-    def test_known_signal_maps_to_lakevision_channel(self):
+    def test_known_signal_maps_to_adas_channel(self):
         loader = FakeLoader(
             samples=[],
             anns_by_sample={},
@@ -238,7 +238,7 @@ class TestDeriveAll:
 
 class TestMapping:
     def test_every_bus_signal_target_has_an_id(self):
-        for raw_key, lakevision_name in BUS_SIGNAL_TO_CHANNEL.items():
-            assert lakevision_name in DERIVED_CHANNEL_IDS, (
-                f"bus signal {raw_key} maps to {lakevision_name} which has no DERIVED_CHANNEL_ID"
+        for raw_key, adas_name in BUS_SIGNAL_TO_CHANNEL.items():
+            assert adas_name in DERIVED_CHANNEL_IDS, (
+                f"bus signal {raw_key} maps to {adas_name} which has no DERIVED_CHANNEL_ID"
             )

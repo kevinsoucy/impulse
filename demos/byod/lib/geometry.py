@@ -1,4 +1,4 @@
-"""Geometry primitives and schema-encoding helpers for LakeVision.
+"""Geometry primitives and schema-encoding helpers for ADAS.
 
 Two kinds of function live here:
 
@@ -12,7 +12,7 @@ Two kinds of function live here:
    so the encoding lives in core rather than being reinvented per adapter.
 
 Frame convention used throughout: x=forward, y=left, z=up. This matches the
-LakeVision vehicle-frame definition shared by `object_tracks`, `lidar_object_detections`,
+ADAS vehicle-frame definition shared by `object_tracks`, `lidar_object_detections`,
 `free_space`, `predicted_trajectories`, and the OpenLABEL `vehicle-iso8855` export.
 """
 

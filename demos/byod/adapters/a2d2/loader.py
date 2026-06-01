@@ -8,7 +8,7 @@ the NuScenes adapter exposes — `scenes()`, `samples_in_scene()`,
 `all_sample_data_in_scene()` — so the BYOD generic notebooks don't see any
 A2D2-specific types.
 
-A2D2 vocab → LakeVision vocab mapping:
+A2D2 vocab → ADAS vocab mapping:
   scene directory ({YYYYMMDD_HHMMSS})    → container (one container_id per scene)
   per-camera frame at ~10 Hz             → sample (one keyframe = one Sample)
   per-camera image / lidar / label file  → SampleData (one per sensor file)
@@ -102,7 +102,7 @@ BUS_SIGNAL_TO_CHANNEL: dict[str, str] = {
 }
 
 
-# A2D2's published 3D-bbox class names. Reduced to the same LakeVision
+# A2D2's published 3D-bbox class names. Reduced to the same ADAS
 # detection_class vocabulary the NuScenes adapter uses (pedestrian, cyclist,
 # car, truck, bus, van, animal, other).
 def simplify_class(a2d2_class: str) -> str:
@@ -495,7 +495,7 @@ class A2D2Loader:
         """Decode `bus/bus_signals.json` into {a2d2_signal_key: [(ts_us, value)]}.
 
         Returns the raw A2D2 keys (e.g. `vehicle_speed`, `acceleration_x`).
-        Caller maps them to LakeVision channel names via `BUS_SIGNAL_TO_CHANNEL`.
+        Caller maps them to ADAS channel names via `BUS_SIGNAL_TO_CHANNEL`.
         Missing files or signals → empty result; not an error.
         """
         bus_path = Path(scene.scene_dir) / "bus" / "bus_signals.json"

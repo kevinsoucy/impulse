@@ -30,7 +30,7 @@ dataroot_template: "{vroot}/raw/a2d2/{version}"
 # OpenLABEL package metadata strings (03_per_event_detail.py).
 openlabel:
   annotator: a2d2_ground_truth
-  exporter: lakevision-demo/byod/adapters/a2d2
+  exporter: adas-demo/byod/adapters/a2d2
   stream_description_prefix: "A2D2 "
 
 # Format hints for 04_visualize.py.

@@ -17,7 +17,6 @@ maintainers = [
 ]
 dependencies = [
     "lz4==4.4.5",
-    "nptyping==2.5.0",
 ]
 
 # Pre-installed on Databricks Serverless env v4 (and DBR ML runtimes).
@@ -52,7 +51,11 @@ dev = [
     "pytest-mock==3.15.1",
     "ruff==0.9.10",
     "setuptools==75.8.2",
-    "black==26.3.1"
+    "black==26.3.1",
+    # Required to run the BYOD demo's map-context tests locally and in CI.
+    # Mirrors demos/byod/pyproject.toml; pinned to the serverless pin in
+    # bundle/resources/jobs.yml.
+    "shapely==2.1.2",
 ]
 
 # Setuptools options

@@ -8,18 +8,18 @@ This adapter is the second reference adapter after NuScenes. Its value is **prov
 
 ## License
 
-CC BY-ND 4.0. NoDerivatives applies to *redistributed derivative datasets* — the demo pipeline reads the data and writes LakeVision Delta tables in a separate namespace; that's not redistribution. Internal Databricks demo use is unencumbered. **Confirm with legal before publishing any derived A2D2 data (e.g. Delta Share to a customer).**
+CC BY-ND 4.0. NoDerivatives applies to *redistributed derivative datasets* — the demo pipeline reads the data and writes ADAS Delta tables in a separate namespace; that's not redistribution. Internal Databricks demo use is unencumbered. **Confirm with legal before publishing any derived A2D2 data (e.g. Delta Share to a customer).**
 
 ## Prerequisites
 
 1. Register at https://www.a2d2.audi/a2d2/en/download.html.
 2. Download the `camera_lidar_semantic_bboxes` subset (~400 GB).
-3. Extract into `/Volumes/<catalog>/lakevision_demo_silver/raw/a2d2/camera_lidar_semantic_bboxes/`.
+3. Extract into `/Volumes/<catalog>/demo_silver/raw/a2d2/camera_lidar_semantic_bboxes/`.
 
 After extraction, the dataroot must contain:
 
 ```
-/Volumes/<catalog>/lakevision_demo_silver/raw/a2d2/
+/Volumes/<catalog>/demo_silver/raw/a2d2/
 ├── cams_lidars.json
 └── camera_lidar_semantic_bboxes/
     ├── 20180807_145028/
@@ -50,7 +50,7 @@ The bundle dependency list in `resources/jobs.yml` does not include any A2D2-spe
 
 ## Coverage
 
-| Phase | LakeVision table | A2D2 source |
+| Phase | ADAS table | A2D2 source |
 |---|---|---|
 | Phase 1 | `channels` | `bus_signals.json` (real bus signals) + per-frame annotation aggregates |
 | Foundation | `perception_channels` | Camera PNGs + LiDAR NPZs (one row per file) |
@@ -62,7 +62,7 @@ The bundle dependency list in `resources/jobs.yml` does not include any A2D2-spe
 
 **Bus signals** (real ECU readings, no synthesis):
 
-| LakeVision channel | A2D2 bus key | Unit |
+| ADAS channel | A2D2 bus key | Unit |
 |---|---|---|
 | Vehicle_Speed_kph | `vehicle_speed` | kph |
 | Vehicle_Accel_Longitudinal_ms2 | `acceleration_x` | m/s² |
@@ -108,7 +108,7 @@ These tables remain empty when the bundle runs with `adapter=a2d2`. The pipeline
 - **`object_tracks.relative_velocity_ms` is always `None`.** A2D2's per-frame box keys (`box_0`, `box_1`, …) are local to the frame; the same physical object gets a different key in the next frame. There is no instance token, so cross-frame velocity cannot be computed. TSAL scenario search that depends on `relative_velocity_ms` will silently exclude A2D2 — a real limitation customers should understand if they're using A2D2 for that workload.
 - **`object_tracks.source` is constant `"ground_truth_camera_lidar"`.** Annotations were created by labelers fusing camera + LiDAR. No per-annotation sensor-coverage metadata is published, so we encode it as a single string.
 - **Ego pose is identity.** A2D2 does not publish a separate global ego pose stream. Box translations are already in the vehicle frame, so `global_to_ego` becomes a no-op and the rest of the geometry pipeline is unchanged.
-- **Camera calibration interpretation.** The loader translates A2D2's `view = {origin, x-axis, y-axis}` into the (translation, quaternion) shape that `lakevision.geometry.rotation_matrix_from_quat` consumes. The published axes are assumed to define a right-handed `[x, y, z=x×y]` basis (the loader re-orthogonalizes `y` to enforce this when necessary).
+- **Camera calibration interpretation.** The loader translates A2D2's `view = {origin, x-axis, y-axis}` into the (translation, quaternion) shape that `adas.geometry.rotation_matrix_from_quat` consumes. The published axes are assumed to define a right-handed `[x, y, z=x×y]` basis (the loader re-orthogonalizes `y` to enforce this when necessary).
 - **Sample timestamps are synthesized.** A2D2 frame filenames carry a monotonic 9-digit index, not microseconds. The loader synthesizes a microsecond timestamp as `scene_start + frame_index × 100,000 µs` (10 Hz). This keeps Δt accurate at the frame level even though the absolute clock matches only the scene start.
 
 ---

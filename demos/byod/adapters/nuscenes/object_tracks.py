@@ -1,4 +1,4 @@
-"""Convert NuScenes annotations to LakeVision `object_tracks` rows.
+"""Convert NuScenes annotations to ADAS `object_tracks` rows.
 
 Each NuScenes ground-truth annotation becomes one `object_tracks` row:
 - `distance_m`, `azimuth`, `lane_offset` computed in ego frame

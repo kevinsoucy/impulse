@@ -30,7 +30,7 @@ from pathlib import Path
 # COMMAND ----------
 
 dbutils.widgets.text("catalog",       "adas_engine_validate_catalog", "UC catalog")
-dbutils.widgets.text("schema_prefix", "lakevision_demo",              "Schema prefix")
+dbutils.widgets.text("schema_prefix", "demo",              "Schema prefix")
 dbutils.widgets.text("version",       "v1.0-trainval",                "Dataset version")
 dbutils.widgets.dropdown("with_map_expansion", "true", ["true", "false"], "Also stage map expansion v1.3")
 dbutils.widgets.dropdown("keyframes", "true", ["true", "false"], "Stage keyframe sensor blobs")

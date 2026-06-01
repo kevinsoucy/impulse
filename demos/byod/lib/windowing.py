@@ -76,11 +76,11 @@ def filter_dataframe_to_windows(
     row_cols = rows.columns
     windowed_events = events.select(
         F.col(id_col),
-        (F.col(event_start_col) - F.lit(pre_buffer_us)).alias("__lakevision_window_start"),
-        (F.col(event_end_col) + F.lit(post_buffer_us)).alias("__lakevision_window_end"),
+        (F.col(event_start_col) - F.lit(pre_buffer_us)).alias("__adas_window_start"),
+        (F.col(event_end_col) + F.lit(post_buffer_us)).alias("__adas_window_end"),
     )
     joined = rows.join(windowed_events, on=id_col, how="inner").where(
-        (F.col(ts_col) >= F.col("__lakevision_window_start"))
-        & (F.col(ts_col) <= F.col("__lakevision_window_end"))
+        (F.col(ts_col) >= F.col("__adas_window_start"))
+        & (F.col(ts_col) <= F.col("__adas_window_end"))
     )
     return joined.select(*row_cols).dropDuplicates()

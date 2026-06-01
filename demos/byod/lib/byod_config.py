@@ -7,13 +7,13 @@ values and the resolved adapter's YAML.
 
 Layout produced (with default args, `adapter=nuscenes`, `dataset_version=v1.0-mini`):
   Catalog:                  main
-  Silver schema:            main.lakevision_demo_silver
-  Perception silver schema: main.lakevision_demo_perception_silver
-  Gold schema:              main.lakevision_demo_gold
-  Raw data volume:          /Volumes/main/lakevision_demo_silver/raw/<dataset_version>/
-  Camera frames volume:     /Volumes/main/lakevision_demo_silver/camera_frames/
-  LiDAR scans volume:       /Volumes/main/lakevision_demo_silver/lidar_scans/
-  OpenLABEL exports volume: /Volumes/main/lakevision_demo_silver/openlabel_packages/
+  Silver schema:            main.demo_silver
+  Perception silver schema: main.demo_perception_silver
+  Gold schema:              main.demo_gold
+  Raw data volume:          /Volumes/main/demo_silver/raw/<dataset_version>/
+  Camera frames volume:     /Volumes/main/demo_silver/camera_frames/
+  LiDAR scans volume:       /Volumes/main/demo_silver/lidar_scans/
+  OpenLABEL exports volume: /Volumes/main/demo_silver/openlabel_packages/
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ class BYODConfig:
         adapter_name: str,
         dataset_version: str | None = None,
         catalog: str = "main",
-        schema_prefix: str = "lakevision_demo",
+        schema_prefix: str = "demo",
         volume_root: str | None = None,
         adapter_yaml_path: Path | str | None = None,
     ) -> "BYODConfig":
@@ -133,7 +133,7 @@ class BYODConfig:
             adapter_name=adapter_name,
             dataset_version=settings.get("dataset_version"),
             catalog=settings.get("catalog", "main"),
-            schema_prefix=settings.get("schema_prefix", "lakevision_demo"),
+            schema_prefix=settings.get("schema_prefix", "demo"),
             volume_root=settings.get("volume_root"),
             adapter_yaml_path=path,
         )

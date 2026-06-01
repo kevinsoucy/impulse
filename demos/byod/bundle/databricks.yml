@@ -1,4 +1,4 @@
-# Databricks Asset Bundle — LakeVision demo (Impulse + LakeVision BYOD,
+# Databricks Asset Bundle — ADAS demo (Impulse + ADAS BYOD,
 # ADAS data domain).
 #
 # Two structural choices vs. earlier `byod_demo` bundle:
@@ -24,13 +24,17 @@
 #
 # Adapter selection happens at deploy time via --var "adapter=<name>".
 #
-# Deploy:    databricks bundle deploy --target shared --profile <ws>
-# Run:       databricks bundle run bootstrap_job --target shared --profile <ws>
-#            databricks bundle run run_all_job   --target shared --profile <ws>
-# Tear down: databricks bundle destroy --target shared --profile <ws>
+# Two shared (production) deployments: `mini` (NuScenes v1.0-mini) and `full`
+# (NuScenes v1.0-trainval). Each lands in its own schema set + root_path.
+#
+# Deploy:    databricks bundle deploy -t mini --var "catalog=<cat>" --profile <ws>
+#            databricks bundle deploy -t full --var "catalog=<cat>" --profile <ws>
+# Run:       databricks bundle run bootstrap_job -t <mini|full> --var "catalog=<cat>" --profile <ws>
+#            databricks bundle run run_all_job   -t <mini|full> --var "catalog=<cat>" --profile <ws>
+# Tear down: databricks bundle destroy -t <mini|full> --profile <ws>
 
 bundle:
-  name: lakevision_demo
+  name: demo
 
 include:
   - resources/jobs.yml
@@ -73,18 +77,28 @@ variables:
 
   schema_prefix:
     description: "Prefix for the demo's three schemas. Schemas created: <prefix>_silver, <prefix>_perception_silver, <prefix>_gold."
-    default: lakevision_demo
+    default: demo
 
 targets:
-  # User-scoped development target.
-  dev:
-    mode: development
-    default: true
+  # Two shared (production) deployments side by side, distinguished by dataset
+  # variant + schema_prefix and isolated by root_path. notebook_env.yml
+  # references absolute paths under each target's root.
 
-  # Shared workspace target. Explicit root_path keeps the bundle's workspace
-  # files at a stable, predictable location — `notebook_env.yml` references
-  # absolute paths under this root.
-  shared:
+  # NuScenes v1.0-mini → demo_mini_{silver,perception_silver,gold}.
+  mini:
     mode: production
+    default: true
+    variables:
+      dataset_version: v1.0-mini
+      schema_prefix: demo_mini
     workspace:
-      root_path: /Workspace/Shared/.bundle/${bundle.name}
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/mini
+
+  # NuScenes v1.0-trainval (full) → demo_trainval_{silver,perception_silver,gold}.
+  full:
+    mode: production
+    variables:
+      dataset_version: v1.0-trainval
+      schema_prefix: demo_trainval
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/full

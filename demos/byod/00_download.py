@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--adapter", required=True, help="Adapter name (e.g. 'nuscenes', 'a2d2').")
     p.add_argument("--variant", default=None, help="dataset_version. Defaults to the adapter's default_version.")
     p.add_argument("--catalog", default="main")
-    p.add_argument("--schema-prefix", default="lakevision_demo")
+    p.add_argument("--schema-prefix", default="demo")
     p.add_argument("--volume-root", default=None, help="Override volume root. Default: /Volumes/<catalog>/<schema-prefix>")
     args, _unknown = p.parse_known_args(argv)
 

@@ -4,7 +4,7 @@ Same shape as the NuScenes adapter's `ingest.py`:
   - `ingest_metadata` writes container_tags, container_metrics, channel_tags.
   - `perception_paths` yields one perception_channels row per camera + LiDAR file.
 
-The notebook 01 dispatcher provisions empty LakeVision tables before this
+The notebook 01 dispatcher provisions empty ADAS tables before this
 runs; this module only writes data.
 """
 
@@ -107,7 +107,7 @@ def ingest_metadata(spark, loader: A2D2Loader, cfg) -> None:
 
     # ── channel_tags ──
     channel_tag_rows: list[Row] = []
-    bus_keys_by_lakevision_name = {v: k for k, v in BUS_SIGNAL_TO_CHANNEL.items()}
+    bus_keys_by_adas_name = {v: k for k, v in BUS_SIGNAL_TO_CHANNEL.items()}
     for s in scenes:
         for sensor_name, channel_id in SENSOR_CHANNEL_IDS.items():
             sensor_type = _sensor_type(sensor_name)
@@ -122,7 +122,7 @@ def ingest_metadata(spark, loader: A2D2Loader, cfg) -> None:
             channel_tag_rows.append(Row(container_id=s.container_id, channel_id=channel_id, key="unit", value=meta["unit"]))
             channel_tag_rows.append(Row(container_id=s.container_id, channel_id=channel_id, key="kind", value=meta["kind"]))
             channel_tag_rows.append(Row(container_id=s.container_id, channel_id=channel_id, key="source", value=meta["source"]))
-            raw_bus_key = bus_keys_by_lakevision_name.get(channel_name)
+            raw_bus_key = bus_keys_by_adas_name.get(channel_name)
             if raw_bus_key:
                 channel_tag_rows.append(Row(container_id=s.container_id, channel_id=channel_id, key="bus_signal_key", value=raw_bus_key))
             if "detection_class" in meta:

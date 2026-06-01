@@ -46,7 +46,7 @@ class TestSimplifyClass:
         ("UnknownClass", "unknownclass"),
         ("", "other"),
     ])
-    def test_maps_to_lakevision_class(self, raw, expected):
+    def test_maps_to_adas_class(self, raw, expected):
         assert simplify_class(raw) == expected
 
 
@@ -137,8 +137,8 @@ class TestAxesToQuat:
 
 class TestChannelIdTables:
     def test_all_bus_signal_mappings_resolve_to_known_channels(self):
-        for lakevision_name in BUS_SIGNAL_TO_CHANNEL.values():
-            assert lakevision_name in DERIVED_CHANNEL_IDS
+        for adas_name in BUS_SIGNAL_TO_CHANNEL.values():
+            assert adas_name in DERIVED_CHANNEL_IDS
 
     def test_sensor_channel_ids_are_distinct(self):
         values = list(SENSOR_CHANNEL_IDS.values())

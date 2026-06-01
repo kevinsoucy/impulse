@@ -53,7 +53,7 @@ class Adapter(Protocol):
     def ingest_metadata(self, spark) -> None:
         """Write the dataset-specific `container_tags`, `container_metrics`,
         and `channel_tags` rows. The generic notebook 01 has already created
-        empty LakeVision tables — this method only writes data."""
+        empty ADAS tables — this method only writes data."""
 
     # ── Phase 1 (notebook 01) ───────────────────────────────────────────────
 

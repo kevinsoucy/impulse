@@ -4,7 +4,7 @@ These helpers live with the demo (rather than in the core engine) because they
 consume the BYOD adapter Protocol's `visualize_format()` contract — the
 per-adapter dispatch keys
 (`camera_reader`, `lidar_reader`, `lidar_dtype`, `lidar_stride`) are part of
-the BYOD contract, not part of the LakeVision data model.
+the BYOD contract, not part of the ADAS data model.
 """
 
 from __future__ import annotations

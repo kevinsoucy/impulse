@@ -36,7 +36,7 @@ def map_annotation_to_lidar_detection(ann: Annotation) -> dict:
     """
     cx, cy, cz = (float(c) for c in ann.translation)
 
-    # A2D2 size convention is (length, width, height) — same as the LakeVision
+    # A2D2 size convention is (length, width, height) — same as the ADAS
     # schema, so no reordering is needed (unlike NuScenes' (w, l, h)).
     length, width, height = (float(s) for s in ann.size)
 

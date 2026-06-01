@@ -61,7 +61,7 @@ See `demos/byod/bundle/README.md` for the full prerequisites + first-time-deploy
 
 ## Coverage
 
-| Phase | LakeVision table | NuScenes source |
+| Phase | ADAS table | NuScenes source |
 |---|---|---|
 | Phase 1 | `channels` | Synthesized 9 scalars/scene from ego pose deltas + annotation aggregates (no CAN bus). See `scalar_source.py` for the exact list. |
 | Foundation | `perception_channels` | Camera JPEGs (front + 5 surround) + LiDAR `.bin` from `samples/` |

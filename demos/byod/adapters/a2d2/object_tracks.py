@@ -1,4 +1,4 @@
-"""Convert A2D2 annotations to LakeVision `object_tracks` rows.
+"""Convert A2D2 annotations to ADAS `object_tracks` rows.
 
 Two A2D2-specific simplifications vs. NuScenes:
 

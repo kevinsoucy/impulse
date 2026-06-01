@@ -50,7 +50,7 @@ def _box_corners_vehicle(
 
     A2D2 size convention is (length, width, height) and the box's local axes
     are x=forward (length), y=left (width), z=up (height) — the canonical
-    LakeVision convention. No reordering vs. NuScenes' (width, length, height).
+    ADAS convention. No reordering vs. NuScenes' (width, length, height).
     """
     l, w, h = size_lwh
     dx, dy, dz = l / 2, w / 2, h / 2

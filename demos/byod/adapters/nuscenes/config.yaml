@@ -19,7 +19,7 @@ dataroot_template: "{vroot}/raw/{version}"
 # Strings injected into the OpenLABEL package metadata (03_per_event_detail.py).
 openlabel:
   annotator: nuscenes_ground_truth
-  exporter: lakevision-demo/byod/adapters/nuscenes
+  exporter: adas-demo/byod/adapters/nuscenes
   stream_description_prefix: "NuScenes "
 
 # Format hints for 04_visualize.py.

@@ -54,6 +54,7 @@ Full license text: [https://opensource.org/licenses/BSD-3-Clause](https://openso
 | idna | 3.12 | Python | runtime | Kim Davies <kim+pypi@gumleaf.org> | [https://github.com/kjd/idna](https://github.com/kjd/idna) |
 | protobuf | 6.33.6 | Python | runtime | protobuf@googlegroups.com | [https://developers.google.com/protocol-buffers/](https://developers.google.com/protocol-buffers/) |
 | pycparser | 3.0 | Python | runtime | Eli Bendersky <eliben@gmail.com> | [https://github.com/eliben/pycparser](https://github.com/eliben/pycparser) |
+| shapely | 2.1.2 | Python | runtime | Sean Gillies and Shapely contributors | [https://github.com/shapely/shapely](https://github.com/shapely/shapely) |
 
 ---
 
@@ -113,7 +114,6 @@ Full license text: [https://opensource.org/licenses/MIT](https://opensource.org/
 | identify | 2.6.19 | Python | dev | Chris Kuehl | [https://github.com/pre-commit/identify](https://github.com/pre-commit/identify) |
 | iniconfig | 2.3.0 | Python | dev | Ronny Pfannschmidt <opensource@ronnypfannschmidt.de>, Holger Krekel <holger.krekel@gmail.com> | [https://github.com/pytest-dev/iniconfig](https://github.com/pytest-dev/iniconfig) |
 | mypy_extensions | 1.1.0 | Python | runtime | The mypy developers <jukka.lehtosalo@iki.fi> | [https://github.com/python/mypy_extensions](https://github.com/python/mypy_extensions) |
-| nptyping | 2.5.0 | Python | runtime | Ramon Hagenaars | [https://github.com/ramonhagenaars/nptyping](https://github.com/ramonhagenaars/nptyping) |
 | platformdirs | 4.9.6 | Python | dev | _see upstream_ | [https://github.com/tox-dev/platformdirs](https://github.com/tox-dev/platformdirs) |
 | pluggy | 1.6.0 | Python | dev | Holger Krekel <holger@merlinux.eu> |  |
 | pre_commit | 4.1.0 | Python | runtime | Anthony Sottile | [https://github.com/pre-commit/pre-commit](https://github.com/pre-commit/pre-commit) |

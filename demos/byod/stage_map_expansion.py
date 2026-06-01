@@ -20,7 +20,7 @@ from pathlib import Path
 # COMMAND ----------
 
 dbutils.widgets.text("catalog",       "adas_engine_validate_catalog", "UC catalog")
-dbutils.widgets.text("schema_prefix", "lakevision_demo",              "Schema prefix")
+dbutils.widgets.text("schema_prefix", "demo",              "Schema prefix")
 
 _catalog = dbutils.widgets.get("catalog")
 _schema_prefix = dbutils.widgets.get("schema_prefix")
