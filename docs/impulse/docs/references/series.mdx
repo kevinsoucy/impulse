@@ -3,6 +3,8 @@ sidebar_position: 7
 title: Series
 ---
 
+import ShapeTable from '@site/src/components/ShapeTable';
+
 # Series
 
 Impulse 1.0 modelled measurement recordings as **scalar time-series channels** —
@@ -24,19 +26,128 @@ reporting that names which object triggered each matching window.
 A scalar channel is just the simplest kind of series: a run-length-encoded
 series with a single `value` payload column and no entity key.
 
+## One shape vs. many
+
+Impulse 1.0 held exactly one shape — a scalar channel, one value per
+`(signal, instant)`. Real campaigns carry more: an IMU writes several typed values
+(some of them strings) at one instant; a lidar or camera frame holds *many* detected
+objects at the same instant, each its own row keyed by an entity; sign reads and
+geolocation fixes are sampled events. A series registers any of these as-is — your
+schema, any number of tables, no limit.
+
+**Impulse 1.0 — one shape**
+
+<div className="max-w-lg my-4">
+  <ShapeTable
+    badge="1.0"
+    title="Scalar channel (RLE)"
+    caption="One value per (channel, interval). The only shape 1.0 can hold."
+    columns={[
+      {label: 'container_id', role: true},
+      {label: 'channel_id', role: true},
+      {label: 'tstart', role: true},
+      {label: 'tend', role: true},
+      {label: 'value'},
+    ]}
+    rows={[
+      [7, 31, 1000, 1040, 28.4],
+      [7, 31, 1040, 1090, 31.1],
+      [7, 31, 1090, 1120, 33.7],
+    ]}
+  />
+</div>
+
+**Impulse 2.0 — your tables, any shape**
+
+<div className="grid gap-4 lg:grid-cols-2 my-4">
+  <ShapeTable
+    badge="2.0"
+    title="Wide / multi-value per instant"
+    caption="One row per timestamp, many typed columns — incl. strings. No entity key (IMU, ECU frame)."
+    columns={[
+      {label: 'container_id', role: true},
+      {label: 'signal', role: true},
+      {label: 'frame_ts', role: true},
+      {label: 'accel_x'},
+      {label: 'accel_y'},
+      {label: 'gear'},
+    ]}
+    rows={[
+      [7, 'imu', 1000, 0.12, -0.04, '"D"'],
+      [7, 'imu', 1010, 0.15, -0.02, '"D"'],
+      [7, 'imu', 1020, 0.09, 0.01, '"N"'],
+    ]}
+  />
+
+  <ShapeTable
+    badge="2.0"
+    title="Entity-keyed (lidar / radar / camera)"
+    caption="Many detections share one frame — each carries an object_id."
+    columns={[
+      {label: 'container_id', role: true},
+      {label: 'sensor', role: true},
+      {label: 'frame_ts', role: true},
+      {label: 'object_id', role: true},
+      {label: 'class'},
+      {label: 'distance_m'},
+    ]}
+    rows={[
+      [7, 'lidar', 1000, 12, 'car', 22.5],
+      [7, 'lidar', 1000, 13, 'cyclist', 7.4],
+      [7, 'lidar', 1000, 47, 'pedestrian', 15.1],
+      [7, 'lidar', 1010, 12, 'car', 21.8],
+    ]}
+    highlight={{
+      rows: [0, 1, 2],
+      col: 2,
+      note: 'Three objects share one frame_ts — three rows for a single instant. A 1.0 scalar channel holds exactly one value per (signal, time), so this shape is unrepresentable in 1.0.',
+    }}
+  />
+
+  <ShapeTable
+    badge="2.0"
+    title="Point-in-time detections"
+    caption="Sampled events — sign reads, geolocation fixes. String + numeric payload."
+    columns={[
+      {label: 'container_id', role: true},
+      {label: 'signal', role: true},
+      {label: 'frame_ts', role: true},
+      {label: 'value'},
+      {label: 'confidence'},
+    ]}
+    rows={[
+      [7, 'sign_cam', 1000, '"30"', 0.97],
+      [7, 'sign_cam', 1180, '"50"', 0.91],
+      [7, 'sign_cam', 1340, '"stop"', 0.88],
+    ]}
+  />
+
+  <div className="rounded-xl border border-dashed border-[var(--ifm-color-emphasis-300)] flex items-center justify-center p-6 text-center text-sm text-[var(--ifm-color-emphasis-600)]">
+    <span>＋ register any table, any shape — <strong>no limit</strong></span>
+  </div>
+</div>
+
 ---
 
 ## When to use one
 
-A series with an `entity_key` is the right tool when **multiple rows can exist
-for the same `(session, signal, timestamp)`**. If your data doesn't have that
-shape, channels remain the right answer:
+What to use is two questions, often conflated:
+
+1. **Series or channel?** A scalar channel fits exactly one shape: a single
+   **numeric** value per `(signal, instant)`. Anything wider — several values at
+   one instant, *any* non-numeric value, or several rows at one instant — is a
+   series.
+2. **`entity_key` or not?** This is a choice *within* series, not the
+   series-vs-channel line. Add an `entity_key` only when multiple rows can share
+   one `(session, signal, timestamp)`, each a distinct entity. A wide table with
+   one row per instant — an IMU sample, an ECU frame — is a series with **no**
+   `entity_key`.
 
 | Your data shape | What to use |
 |-----------------|-------------|
-| One scalar value per timestamp per signal | Scalar channels (one channel per signal) |
-| Wide row, one row per timestamp, no per-entity multiplicity | A series with no `entity_key`, or N parallel channels |
-| Multiple rows per `(session, signal, timestamp)`, each row is one detected entity | A series with an `entity_key` |
+| A single **numeric** value per `(signal, instant)` | Scalar channel (one per signal) — the 1.0 case |
+| Several values per instant, or any string value, one row per instant (IMU, ECU frame) | A series with **no** `entity_key` |
+| Several rows per `(session, signal, timestamp)`, each a distinct entity (lidar objects, defects) | A series with an `entity_key` |
 | Pre-aggregated intervals (one row per `[tstart, tend)`) | A run-length-encoded series (`tstart_col`/`tend_col`) |
 | Lookup / dimension tables (no timestamp) | Join target, not a query series |
 
@@ -93,7 +204,7 @@ The series maps the customer's physical column names onto the engine's logical
   it to `"container_id"`.
 - **`signal_col`** — the column mapped to the signal-identity role. Defaults to
   `"signal_id"`; the example overrides it to `"sensor"` (values like `"lidar"`,
-  `"radar"`, `"camera_front"`). Signal is a first-class filtering dimension — the
+  `"radar"`, `"camera_front"`). Signal is a primary filtering dimension — the
   equivalent of a channel in Impulse 1.0 — so every series must carry one.
 - **One time-axis shape**, exactly one of:
   - **`timestamp_col`** (point-in-time) — each row is a sample at an instant;
@@ -137,7 +248,7 @@ ot = db.query.series("object_tracks")
 cyclist_close = (ot.detection_class == 1) & (ot.distance_m < 8.0)
 ```
 
-A few things to notice:
+Notes:
 
 - Each column access (`ot.distance_m`) reflects the schema and returns a typed
   proxy. **Numeric** columns support `<`, `<=`, `==`, `!=`, `>=`, `>`, `isin`,
@@ -160,8 +271,8 @@ own series or channel.
 
 ### Composing with channel predicates
 
-The payoff is composition. A series predicate produces the same `Intervals` shape
-a channel predicate does, so the two combine in one expression:
+A series predicate produces the same `Intervals` shape a channel predicate does,
+so the two combine in one expression:
 
 ```python
 ego_fast = db.query.signal("Vehicle Speed Sensor") > 30  # km/h
@@ -262,7 +373,7 @@ finalize the predicate for you. The explicit call is only necessary when the
 A cross-series query compares timestamps **directly, as raw integers**, so every
 series in a query (and the container metrics) must share one time axis — same unit,
 same epoch, aligned upstream at ingest. A mismatch is silently wrong, not an error.
-See the [Query Engine reference](query_engine.md), "Time-axis alignment", for the
+See the [Query Engine reference](query_engine.mdx), "Time-axis alignment", for the
 full precondition and the upstream levers (RLE, quantization, downsampling) that
 keep dense series tractable.
 
@@ -270,9 +381,9 @@ keep dense series tractable.
 
 ## Where else this fits
 
-The engine's role is identical across domains: schema reflection drives the
-accessor, the per-container evaluation pipeline applies the predicate, and the
-result composes with channel predicates. Only the registration differs.
+ADAS is the worked example, but the same series model fits any domain where many
+entities share a timeline — only the registration changes. The question is always
+the same shape: which entity did something, while something else held.
 
 - **Industrial test cells — per-cycle defect inspection.** Multiple units flow
   through one production cycle. *"Cycles where unit A failed dimensional check
@@ -294,48 +405,3 @@ The pattern repeats. Customers whose primary data is entity-keyed (a labeling
 team, a defect tracker, a fleet diagnostics archive) can use Impulse end-to-end
 without channel data — the recording is still the unit of partitioning, but the
 channels table can be empty.
-
----
-
-## Technical implementation
-
-A series is a frozen dataclass holding the Spark schema, the session/signal role
-columns, the time-axis shape (point-in-time **or** RLE), and an optional
-`entity_key`. Registration on the `MeasurementDB` stores it alongside a
-`source_factory` that produces the backing `DataFrame` per solve. Authoring-time
-lookups (`db.query.series(name)` → `SeriesAccessor`) and execution-time loads (the
-solver calls the factory) reach the same registry.
-
-Predicates are authored through `SeriesAccessor`. Each non-structural column
-returns a typed proxy whose operators build a `_PartialPredicate` — a fusible
-per-row predicate against the series. Same-series `&` / `|` between partials fuse
-the clauses into a single row-level callable; cross-series or series-plus-channel
-composition finalizes each partial and falls through to the standard interval
-algebra.
-
-`.entity_condition()` finalizes a partial as an entity-scoped `SeriesSelector`, a
-regular `TimeSeriesExpression` leaf whose `leaf_kind` is the series name. The
-channel-side filter pipeline only walks selectors with `leaf_kind == "channel"`,
-so series leaves never reach the channel-tag / channel-metric stages. A partial
-finalized without `.entity_condition()` (the default, including the `BasicEvent`
-auto-finalize path) is a presence leaf — "does this hold anywhere?".
-
-At evaluation time, a point-in-time series synthesizes each row's interval as
-`[timestamp, next_tick)` where `next_tick` is the next distinct timestamp in that
-row's `(session, signal)` frame list, with the final frame closing at the
-session's stop timestamp (`SolverConfig.container_stop_ts_col`, default
-`"stop_ts"`). An RLE series uses its row intervals directly.
-
-For a cross-series query the engine does not co-locate raw rows. Each series is
-**reduced in a distributed Spark stage** — grouped by `(session, signal, entity)`,
-so each group is one entity's rows and stays small — to the per-leaf interval sets
-its predicates produce (point-in-time `tend` is precomputed in Spark first). A
-single binary cogroup (one Spark co-partitioned join) then brings the reduced
-interval sets and the channel rows together per container. Because every series leaf is interval-valued (predicates
-only, no aggregations), this reduction carries no information loss. `EntityEvent`
-runs the same machinery and emits one fact row per matching window per entity, the
-entity's identity serialized into `entity_key`.
-
-Scalar channels are untouched. Channel-only queries continue on the existing fast
-path; the series registry is consulted only when a query's selections include
-series leaves.

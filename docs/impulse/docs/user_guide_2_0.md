@@ -9,11 +9,11 @@ This guide is the map. It explains how Impulse 2.0 thinks about your data — th
 difference between channels and series, how the metadata tables fit together,
 how to query across several tables at once, and what's required versus nice to
 have. For the deep dive on series specifically, see the
-[Series reference](references/series.md).
+[Series reference](references/series.mdx).
 
 ---
 
-## The one idea behind everything
+## The core idea
 
 Impulse turns a **question about time** into a **set of time intervals**.
 
@@ -22,8 +22,7 @@ and the engine gives you back the windows when it was true. Predicates combine
 with `&` (both true at once) and `|` (either true), and the answer is always
 intervals of time, per recording.
 
-That's the whole model. Channels and series are just two kinds of data you can
-write predicates against.
+Channels and series are just two kinds of data you write predicates against.
 
 ---
 
@@ -31,7 +30,7 @@ write predicates against.
 
 A **channel** is one number that changes over time — engine RPM, vehicle speed,
 a temperature. One value per moment. This is what Impulse 1.0 handled, and it
-still works exactly the same.
+still works the same.
 
 A **series** is your own table where each row is a thing observed at a time, and
 **many rows can share the same moment**. A camera frame holds twenty detected
@@ -49,9 +48,9 @@ Use this table to decide:
 | A lookup table with no timestamp | Not a query source — join it upstream |
 
 An **entity key** is the column that says which thing a row is about — an object
-ID, a station, a driver. It lets you ask *which one*, not just *whether*. An
-entity key is scoped to its signal: object `47` seen by the lidar and object `47`
-seen by the radar are two different things.
+ID, a station, a driver — so you can ask *which one* matched, not only that
+something did. An entity key is scoped to its signal: object `47` seen by the
+lidar and object `47` seen by the radar are two different things.
 
 A channel is simply the smallest possible series — one value column, no
 entities. Nothing in 2.0 is bolted on; series are the general case and channels
@@ -117,17 +116,16 @@ lidar_only = (ot.sensor_type == "lidar") & (ot.distance_m < 8.0)
 lidar_or_fusion = ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)
 ```
 
-A signal filter prunes at the **source read** (so the engine never loads signals
-no clause can match), and entity identity stays scoped to its signal: object `47`
-on lidar and object `47` on fusion remain two separate entities — `isin` widens
-which signals you consider, it never merges an id across them.
+A signal filter prunes at the **source read** — the engine never loads signals no
+clause can match — and `isin` only widens which signals you consider; it never
+merges an entity id across them (object `47` on lidar ≠ on fusion, as above).
 
 ---
 
 ## Querying across several tables at once
 
-This is the payoff of 2.0. A series predicate produces the same time-intervals a
-channel predicate does, so you write them side by side and combine them:
+A series predicate produces the same time-intervals a channel predicate does, so
+you write them side by side and combine them:
 
 ```python
 ot   = db.query.series("object_tracks")
@@ -165,40 +163,27 @@ If two cyclists trigger the predicate in the same window, you get two output row
 map, e.g. `{"object_tracks": {"radar": ["47"]}}`. Every other event type leaves
 that column `NULL`, so your existing reports are unaffected.
 
-**One row instead of many.** If you only need to know *that* the window happened
-and which entities were involved — not a separate row per entity — pass
-`per_entity_windowing=False`. You then get one combined row per matched window
-whose `entity_key` unions every entity, e.g.
-`{"object_tracks": {"radar": ["47", "48"]}}`:
+**One row instead of many.** Pass `per_entity_windowing=False` (default `True`) to
+get one combined row per matched window whose `entity_key` unions every
+participating entity, instead of a row per entity.
 
-```python
-near_miss = EntityEvent(
-    name="cyclist_near_miss",
-    expr=(ot.detection_class == "cyclist") & (ot.distance_m < 8.0),
-    per_entity_windowing=False,  # default True → one row per entity
-)
-```
+**Pull the entity's payload.** Join the fact rows back to the series table on the
+entity identity to get that object's columns within the window — the event gives
+you *which* and *when*, the join brings back the *what*.
 
-**Next step — pull the entity's payload.** The `entity_key` is the object's
-identity, so you can join the fact rows back to the series table on
-`(container_id, signal, entity id)` to retrieve that object's columns within the
-event window — bounding boxes, class, distance track, etc. The event tells you
-*which* object and *when*; the join brings back the *what*.
-
-For correlating *two different* entities ("a close cyclist while a car braked"),
-and for all the registration and operator details, see the
-[Series reference](references/series.md).
+For correlating *two different* entities ("a close cyclist while a car braked")
+and the full registration and operator details, see the
+[Series reference](references/series.mdx).
 
 ---
 
 ## Best practices
 
-**Put every table on the same clock.** When a query spans more than one table,
-Impulse compares timestamps as plain integers — it does not convert units or
-resample. So every series in a query, and the recording metadata, must use the
-**same time unit and the same epoch**. A mismatch isn't caught at runtime (both
-sides are just integers) and quietly gives wrong answers. Align timestamps once,
-upstream at ingest. This is the single most important rule in 2.0.
+**Put every table on the same clock.** A cross-table query compares timestamps as
+plain integers — no unit conversion, no resampling — so every series and the
+recording metadata must share the **same unit and epoch**. A mismatch isn't caught
+at runtime; it quietly gives wrong answers. Align once, upstream at ingest — the
+single most important rule in 2.0.
 
 **Keep dense series small at ingest.** A camera running at 10 Hz for 30 minutes
 with 200 objects per frame is millions of rows per recording. Three upstream
@@ -232,9 +217,9 @@ own series or channel.
 
 ## Where to go next
 
-- **[Series reference](references/series.md)** — registration options, the full
+- **[Series reference](references/series.mdx)** — registration options, the full
   operator set, per-entity and cross-entity reporting, the technical details.
-- **[Query Engine reference](references/query_engine.md)** — choosing a solver
+- **[Query Engine reference](references/query_engine.mdx)** — choosing a solver
   and the time-axis precondition in full.
 - **[Getting Started](getting_started.md)** — run a report end-to-end in five
   minutes.

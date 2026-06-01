@@ -5,7 +5,7 @@ title: What's New & Upgrading in 2.0
 
 # What's New in Impulse 2.0
 
-Impulse 2.0 adds **series**: first-class support for time-series tables where
+Impulse 2.0 adds **series**: support for time-series tables where
 many things can exist at the same instant, each carrying a wide row of typed
 columns. ADAS object detections, defect inspections, lap events, diagnostic
 trouble codes — all fit this shape.
@@ -29,6 +29,10 @@ It opens a new data shape without changing anything you already do. The
 In 1.0 you could query **scalar channels** — one number per signal per moment.
 In 2.0 you can also query **series** — your own tables, of any shape — and
 combine the two in a single expression.
+
+A series doesn't require multiple rows per instant: a wide, single-row table
+like an IMU — several values per instant, some non-numeric — is a series with no
+`entity_key`.
 
 ---
 
@@ -68,13 +72,13 @@ scenario = (sign.value == "30") & (speed > 30) & (
 ).entity_condition()
 ```
 
-**Is there a limit on how many tables?** No fixed limit. A realistic ADAS query
-might span a camera table, a lidar table, a signs table, and a lanes table all at
-once — add as many series as your question needs. The engine still resolves them
-in a **single step** per recording (the number of tables doesn't add processing
-stages). The practical limit is how much data one recording holds, not how many
-tables you reference — which is why dense detection data should be compacted
-upstream (see the [User Guide](user_guide_2_0.md), "Best practices").
+**Is there a limit on how many tables?** No fixed limit — add as many series as
+your question needs; the engine resolves them in **one pass per recording** (table
+count adds no stages). See
+[How a cross-series query runs](references/query_engine.mdx#how-a-cross-series-query-runs)
+for the map-reduce picture. The only real limit is how much data one recording
+holds, so compact dense detection data upstream (see
+[Best practices](user_guide_2_0.md#best-practices)).
 
 **6. Bring your own table — no reshaping.**
 Register a table in about five lines by mapping your column names to the engine's
@@ -84,7 +88,7 @@ be empty.
 
 ---
 
-## What stayed exactly the same
+## What stayed the same
 
 | 1.0 capability | Status in 2.0 |
 |---|---|
@@ -152,5 +156,5 @@ Re-running a 1.0 report won't duplicate rows or break the merge.
 
 - **[User Guide](user_guide_2_0.md)** — channels vs series, the metadata tables,
   querying multiple tables, what's required vs optional.
-- **[Series reference](references/series.md)** — the deep dive: registration
+- **[Series reference](references/series.mdx)** — the deep dive: registration
   options, predicate operators, per-entity reporting, cross-entity correlation.

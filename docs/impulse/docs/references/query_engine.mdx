@@ -3,6 +3,8 @@ sidebar_position: 2
 title: Query Engine
 ---
 
+import QueryFlow from '@site/src/components/QueryFlow';
+
 # Query Engine
 
 The query engine resolves channel selections and evaluates events and
@@ -68,48 +70,31 @@ for details.
 your config entirely, the engine runs with `KeyValueStoreSolver` and
 `data_type = "RLE"`.
 
+## How a cross-series query runs
+
+A query that spans several tables resolves as a **map-reduce over recordings**. A
+metadata filter first narrows the campaign to candidate recordings. Then, in a single
+pass per recording, each referenced table applies its own predicate locally and emits
+the intervals where it held — the *map*. TSAL combines those per-table filtered
+intervals with `&`, `|`, `~`, and `.entity_condition()` into the final matching
+intervals — the *reduce*. Referencing more tables adds breadth, not stages: the engine
+still resolves them in one pass per recording.
+
+<QueryFlow/>
+
 ## Time-axis alignment (precondition for cross-series queries)
 
-When a query spans more than one series — for example correlating
-`object_tracks` with `traffic_signs`, or a registered series with channels —
-the engine compares their timestamps **directly, as raw integers**. It never
-resamples a series to a common frequency and never converts between time units
-at query time. This keeps evaluation at native resolution and avoids hidden
-interpolation, but it carries one hard precondition:
+A cross-series query compares timestamps as **raw integers** — no resampling, no
+unit conversion. So every series in a query, plus the container metrics (whose
+`stop_ts` closes a point-in-time series' final frame), must share **one time axis:
+same unit, same epoch** — any integer unit, as long as it's identical everywhere.
+A mismatch is just two `LongType` columns the engine can't tell apart: silently
+wrong intervals, not an error. Align the axes once, upstream at ingest.
 
-> **Every series in a query must share one time axis: the same unit and the
-> same epoch (zero point).** This includes the container's `stop_ts` in
-> `container_metrics`, which the engine uses to close the final frame of a
-> point-in-time series at session end.
-
-The unit itself is unconstrained — microseconds, milliseconds, nanoseconds, or
-any other integer base — as long as it is *identical* across every series and
-the container metrics in the query. The engine cannot detect a mismatch: two
-series in different units are both just `LongType` columns, so a misaligned
-series produces silently wrong intervals rather than an error. Getting the axes
-onto a common base is an **upstream responsibility**, done once at ingest /
-silver before the series is registered, not a runtime conversion.
-
-### Keeping dense series tractable
-
-The same upstream prep step is also where you make dense series (e.g. per-frame
-ADAS object detections — hundreds of objects per frame at 10+ Hz) scale. A query
-evaluates one session's rows for a series together, so a session that is dense
-enough to not fit in memory will fail. Shape the data at ingest with three
-levers that compound:
-
-- **Run-length encoding (RLE)** — store one row per `[tstart, tend)` segment
-  during which a value holds, rather than one row per sample. For a value that
-  changes rarely this is a 100–1000× row reduction.
-- **Value quantization** — round continuous payloads (e.g. `distance_m`) to the
-  coarsest precision the query actually needs. Adjacent frames then share a
-  value, so RLE runs coalesce into longer segments — quantize too finely and you
-  defeat RLE.
-- **Downsampling** — drop the sample rate where the question tolerates it (a
-  "close cyclist" window does not need 100 Hz). This is a linear row reduction.
-
-These are data-model decisions, not engine settings: they belong in the
-pipeline that produces the silver tables the series reads from.
+That same ingest step is also where you keep dense series (per-frame detections at
+10+ Hz) small enough to evaluate — a session's rows are loaded together, so an
+oversized session fails. See [Best practices](../user_guide_2_0.md#best-practices)
+in the User Guide for the three levers (RLE, quantization, downsampling).
 
 ## Configuring the solver
 
