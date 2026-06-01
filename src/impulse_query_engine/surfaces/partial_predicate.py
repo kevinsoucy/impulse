@@ -47,6 +47,26 @@ if TYPE_CHECKING:
 PredicateFn = Callable[[pd.DataFrame], pd.Series]
 
 
+def _and_signal_values(a, b):
+    """Combine signal constraints under AND: a row must satisfy both clauses, so
+    intersect the allowed signal sets. ``None`` means "unconstrained" (the clause
+    doesn't pin the signal), so it contributes no restriction."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a & b
+
+
+def _or_signal_values(a, b):
+    """Combine signal constraints under OR: a row may satisfy either clause, so
+    union the allowed sets — but if either side is unconstrained, the result is
+    unconstrained (a row of any signal could match)."""
+    if a is None or b is None:
+        return None
+    return a | b
+
+
 class _PartialPredicate(TimeSeriesExpression):
     """An in-progress, fusible predicate against one series."""
 
@@ -55,13 +75,21 @@ class _PartialPredicate(TimeSeriesExpression):
         series: "Series",
         predicate: PredicateFn,
         description: str,
+        signal_values: frozenset | None = None,
     ) -> None:
         TimeSeriesExpression.__init__(self, is_single_signal=True)
         self._series = series
         self._predicate = predicate
         self._description = description
+        # Enumerable signal-column constraint for source-read pruning, or None
+        # when the predicate does not pin the signal. See series_selector.py.
+        self._signal_values = signal_values
         # Memoized presence finalization (see _finalize_presence).
         self._presence_selector: "SeriesSelector | None" = None
+
+    @property
+    def signal_values(self) -> frozenset | None:
+        return self._signal_values
 
     @property
     def description(self) -> str:
@@ -79,7 +107,11 @@ class _PartialPredicate(TimeSeriesExpression):
         return isinstance(other, _PartialPredicate) and other._series.name == self._series.name
 
     def _fuse(
-        self, other: "_PartialPredicate", combiner: Callable, symbol: str
+        self,
+        other: "_PartialPredicate",
+        combiner: Callable,
+        symbol: str,
+        sig_combine: Callable,
     ) -> "_PartialPredicate":
         left = self._predicate
         right = other._predicate
@@ -91,18 +123,19 @@ class _PartialPredicate(TimeSeriesExpression):
             self._series,
             fused,
             f"({self._description}) {symbol} ({other._description})",
+            signal_values=sig_combine(self._signal_values, other._signal_values),
         )
 
     def __and__(self, other):
         if self._same_target(other):
-            return self._fuse(other, operator.and_, "AND")
+            return self._fuse(other, operator.and_, "AND", _and_signal_values)
         # Different series or non-partial operand — finalize this side as a
         # presence leaf so the result composes at interval level.
         return self._finalize_presence() & other
 
     def __or__(self, other):
         if self._same_target(other):
-            return self._fuse(other, operator.or_, "OR")
+            return self._fuse(other, operator.or_, "OR", _or_signal_values)
         return self._finalize_presence() | other
 
     # ------------------------------------------------------------------
@@ -154,6 +187,7 @@ class _PartialPredicate(TimeSeriesExpression):
             predicate=self._predicate,
             description=self._description,
             entity_scoped=entity_scoped,
+            signal_values=self._signal_values,
         )
 
     # ------------------------------------------------------------------

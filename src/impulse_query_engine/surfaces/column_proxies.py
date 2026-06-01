@@ -47,15 +47,26 @@ class _ColumnProxy:
         self._series = series
         self._column = column
 
-    def _partial(self, predicate, description: str) -> "_PartialPredicate":
+    def _partial(self, predicate, description: str, signal_values=None) -> "_PartialPredicate":
         from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
 
-        return _PartialPredicate(self._series, predicate, description)
+        return _PartialPredicate(
+            self._series, predicate, description, signal_values=signal_values
+        )
+
+    def _is_signal_column(self) -> bool:
+        return self._column == self._series.signal_col
 
     def _make_comparison(self, op: str, value) -> "_PartialPredicate":
+        # Only an equality on the signal column yields an enumerable
+        # source-prune constraint; other comparisons (ne / lt / ...) do not.
+        signal_values = (
+            frozenset({value}) if op == "eq" and self._is_signal_column() else None
+        )
         return self._partial(
             _comparison_predicate(self._column, op, value),
             f"{self._column} {op} {value!r}",
+            signal_values=signal_values,
         )
 
     def __eq__(self, other) -> "_PartialPredicate":  # type: ignore[override]
@@ -68,11 +79,12 @@ class _ColumnProxy:
         """Match rows where the column value is in *values*."""
         col = self._column
         values = list(values)
+        signal_values = frozenset(values) if self._is_signal_column() else None
 
         def _apply(df):
             return df[col].isin(values)
 
-        return self._partial(_apply, f"{col} isin {values!r}")
+        return self._partial(_apply, f"{col} isin {values!r}", signal_values=signal_values)
 
     def isnull(self) -> "_PartialPredicate":
         """Match rows where the column is null."""

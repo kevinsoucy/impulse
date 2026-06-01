@@ -10,6 +10,8 @@
   clear, actionable message (series-only queries are unaffected).
 """
 
+import types
+
 import pytest
 
 from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver
@@ -126,3 +128,31 @@ def test_only_grouped_map_solvers_provide_a_channel_cache():
 def test_blob_solver_channel_cache_raises_actionable_error():
     with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
         BlobSolver()._channel_cache_cls()
+
+
+# --- _source_signal_filter: which signals to read at the source --------------
+
+
+def _leaf(signal_values):
+    return types.SimpleNamespace(signal_values=signal_values)
+
+
+def test_source_signal_filter_unions_constrained_leaves():
+    leaves = [_leaf(frozenset({"lidar"})), _leaf(frozenset({"radar", "fusion"}))]
+    assert QuerySolver._source_signal_filter(leaves) == frozenset({"lidar", "radar", "fusion"})
+
+
+def test_source_signal_filter_returns_none_if_any_leaf_unconstrained():
+    # An unconstrained leaf could match any signal → must read all signals.
+    leaves = [_leaf(frozenset({"lidar"})), _leaf(None)]
+    assert QuerySolver._source_signal_filter(leaves) is None
+
+
+def test_source_signal_filter_single_constrained_leaf():
+    assert QuerySolver._source_signal_filter([_leaf(frozenset({"lidar"}))]) == frozenset({"lidar"})
+
+
+def test_source_signal_filter_empty_isin_keeps_nothing():
+    # signal.isin([]) → frozenset() → an isin([]) filter that drops every row
+    # (degenerate but correct: no signal can match).
+    assert QuerySolver._source_signal_filter([_leaf(frozenset())]) == frozenset()

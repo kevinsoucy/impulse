@@ -475,6 +475,51 @@ class TestCrossSeriesEdgeCases:
         assert rows[1]["near"] == [[0.0, 10.0]]  # close object present
         assert rows[2]["near"] == []  # only a far object (99m)
 
+    def test_filter_by_signal_value_selects_one_signal(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # Filtering on the signal column (sensor_type) works like any other
+        # column. Container 1 has a close lidar object [0,10) and a close radar
+        # object [20,30); scoping to lidar must return only [0,10).
+        db = key_value_store_db
+        _register_object_tracks(
+            db,
+            rows=[(1, "lidar", 0, 10, 47, 5.0), (1, "radar", 20, 30, 88, 4.0)],
+        )
+        solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
+        query = db.query
+        ot = query.series("object_tracks")
+        near = ((ot.sensor_type == "lidar") & (ot.distance_m < 8.0)).alias("near")
+
+        result = query.select(near).solve(spark=spark, solver=solver)
+        by_container = {r.container_id: r["near"] for r in result.collect()}
+
+        assert by_container[1] == [[0.0, 10.0]]  # radar [20,30) excluded by the signal filter
+
+    def test_filter_by_signal_isin_selects_listed_signals(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # isin over the signal column keeps the listed signals (lidar, fusion)
+        # and drops the rest (radar).
+        db = key_value_store_db
+        _register_object_tracks(
+            db,
+            rows=[
+                (1, "lidar", 0, 10, 47, 5.0),
+                (1, "radar", 20, 30, 88, 4.0),
+                (1, "fusion", 40, 50, 99, 3.0),
+            ],
+        )
+        solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
+        query = db.query
+        ot = query.series("object_tracks")
+        near = (ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)).alias("near")
+
+        result = query.select(near).solve(spark=spark, solver=solver)
+        by_container = {r.container_id: r["near"] for r in result.collect()}
+
+        assert by_container[1] == [[0.0, 10.0], [40.0, 50.0]]  # radar [20,30) excluded
+
     def test_blob_solver_rejects_series_plus_channel_query(
         self, spark: SparkSession, key_value_store_db: MeasurementDB
     ):

@@ -68,11 +68,18 @@ class SeriesSelector(TimeSeriesSelector):
         predicate: PredicateFn,
         description: str,
         entity_scoped: bool = False,
+        signal_values: frozenset | None = None,
     ) -> None:
         self._series = series
         self._predicate = predicate
         self._description = description
         self._entity_scoped = entity_scoped
+        # Enumerable set of signal values this leaf can match (``==``/``isin`` on
+        # the signal column, propagated through ``&``/``|`` fusion), or ``None``
+        # when the leaf does not pin the signal. The solver lifts this to a
+        # source-read filter so Delta can prune files/partitions for signals no
+        # leaf can match; the per-row predicate stays the exact filter.
+        self._signal_values = signal_values
         # Stable per-solve identifier assigned in the driver when a Spark
         # per-entity reduction stage runs ahead of the cogroup. It lets
         # a reduced cache map pre-synthesized intervals back to this leaf across
@@ -96,6 +103,10 @@ class SeriesSelector(TimeSeriesSelector):
     @property
     def entity_scoped(self) -> bool:
         return self._entity_scoped
+
+    @property
+    def signal_values(self) -> frozenset | None:
+        return self._signal_values
 
     @property
     def leaf_kind(self) -> str:

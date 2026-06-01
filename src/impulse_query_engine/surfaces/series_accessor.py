@@ -25,10 +25,12 @@ class SeriesAccessor:
     Looks up the named column in the series' schema and returns a typed
     proxy whose operator overloads construct ``SeriesSelector`` leaves.
 
-    Only **non-structural** columns are exposed: columns mapped to a structural
-    role (``session_col``, ``signal_col``, the time-axis columns, ``entity_key``)
-    are not predicate surfaces and raise ``AttributeError`` if accessed. Of the
-    remaining payload columns, numeric columns return a ``_NumericColumn`` proxy
+    Payload columns **and the signal column** are exposed: the signal column is
+    a primary filter (e.g. ``sensor_type == "lidar"``), so it is queryable like
+    any other column. The remaining structural roles (``session_col``, the
+    time-axis columns, ``entity_key``) are not predicate surfaces and raise
+    ``AttributeError`` if accessed. Of the exposed columns, numeric columns
+    return a ``_NumericColumn`` proxy
     and string columns a ``_StringColumn`` proxy; other non-scalar types (arrays,
     structs, maps) raise ``AttributeError`` naming the column and its Spark type.
     """
@@ -57,11 +59,13 @@ class SeriesAccessor:
                 f"Series {series.name!r} has no column {name!r}; "
                 f"available columns: {sorted(fields)}"
             )
-        if name in series.structural_cols:
+        # The signal column is a queryable filter; the other structural roles
+        # (session / time-axis / entity_key) are not predicate surfaces.
+        if name != series.signal_col and name in series.structural_cols:
             raise AttributeError(
                 f"Column {name!r} on series {series.name!r} is mapped to a "
-                "structural role (session/signal/time/entity_key) and is not "
-                "exposed as a predicate proxy."
+                "structural role (session/time/entity_key) and is not exposed as "
+                "a predicate proxy. (The signal column is queryable.)"
             )
         spark_type = fields[name].dataType
         if isinstance(spark_type, _NUMERIC_SPARK_TYPES):

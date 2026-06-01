@@ -68,10 +68,93 @@ def test_string_equality_returns_partial_predicate():
 # --- structural-column exclusion --------------------------------------------
 
 
-@pytest.mark.parametrize("col", ["container_id", "sensor_type", "frame_ts", "entity_id"])
+@pytest.mark.parametrize("col", ["container_id", "frame_ts", "entity_id"])
 def test_structural_columns_not_exposed(col):
+    # session / time-axis / entity_key are not predicate surfaces. The signal
+    # column is the deliberate exception (covered below).
     with pytest.raises(AttributeError, match="structural role"):
         getattr(_accessor(), col)
+
+
+# --- signal column IS exposed (a primary filter) ----------------------------
+
+
+def test_signal_column_is_exposed_as_proxy():
+    # sensor_type is the signal column, but it is a primary filter (lidar /
+    # radar / fusion), so it is queryable like any other column.
+    assert isinstance(_accessor().sensor_type, _StringColumn)
+
+
+def test_signal_equality_records_signal_constraint():
+    sel = _accessor().sensor_type == "lidar"
+    assert isinstance(sel, _PartialPredicate)
+    assert sel.signal_values == frozenset({"lidar"})
+
+
+def test_signal_isin_records_signal_constraint():
+    sel = _accessor().sensor_type.isin(["lidar", "fusion"])
+    assert sel.signal_values == frozenset({"lidar", "fusion"})
+
+
+def test_signal_filters_rows_like_any_column():
+    df = pd.DataFrame({"sensor_type": ["lidar", "radar", "fusion", "lidar"]})
+    acc = _accessor()
+    assert _mask(acc.sensor_type == "lidar", df) == [True, False, False, True]
+    assert _mask(acc.sensor_type.isin(["lidar", "fusion"]), df) == [True, False, True, True]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda acc: acc.sensor_type != "lidar",
+        lambda acc: acc.sensor_type.contains("lid"),
+        lambda acc: acc.sensor_type.isnull(),
+    ],
+)
+def test_non_enumerable_signal_predicate_has_no_constraint(build):
+    # Only == / isin on the signal column are enumerable source-prune
+    # constraints; !=, substring, null checks leave the signal unconstrained.
+    assert build(_accessor()).signal_values is None
+
+
+def test_payload_predicate_has_no_signal_constraint():
+    assert (_accessor().distance_m < 8.0).signal_values is None
+
+
+# --- signal-constraint propagation through fusion ---------------------------
+
+
+def test_and_with_payload_keeps_signal_constraint():
+    # AND: signal {lidar} ∩ unconstrained payload → still {lidar}.
+    acc = _accessor()
+    fused = (acc.sensor_type == "lidar") & (acc.distance_m < 8.0)
+    assert fused.signal_values == frozenset({"lidar"})
+
+
+def test_and_two_signal_constraints_intersect():
+    acc = _accessor()
+    fused = acc.sensor_type.isin(["lidar", "fusion"]) & (acc.sensor_type == "lidar")
+    assert fused.signal_values == frozenset({"lidar"})
+
+
+def test_or_two_signal_constraints_union():
+    acc = _accessor()
+    fused = (acc.sensor_type == "lidar") | (acc.sensor_type == "radar")
+    assert fused.signal_values == frozenset({"lidar", "radar"})
+
+
+def test_or_with_payload_drops_signal_constraint():
+    # OR: a close row of ANY signal could match → cannot prune by signal.
+    acc = _accessor()
+    fused = (acc.sensor_type == "lidar") | (acc.distance_m < 8.0)
+    assert fused.signal_values is None
+
+
+def test_signal_constraint_survives_finalization():
+    acc = _accessor()
+    fused = (acc.sensor_type == "lidar") & (acc.distance_m < 8.0)
+    assert fused.entity_condition().signal_values == frozenset({"lidar"})
+    assert fused._finalize_presence().signal_values == frozenset({"lidar"})
 
 
 def test_rle_time_columns_not_exposed():

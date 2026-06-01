@@ -54,6 +54,15 @@ _TWO_ENTITY_ROWS = [
     (1, "lidar", 0, 10, 88, 4.0),
 ]
 
+# The same object id (47) seen by three signals in one container/window. A signal
+# filter of isin(["lidar","fusion"]) must keep lidar-47 and fusion-47 as TWO
+# distinct entities (entity keys are signal-scoped) and prune radar-47 at source.
+_SAME_ID_THREE_SIGNALS_ROWS = [
+    (1, "lidar", 0, 10, 47, 5.0),
+    (1, "fusion", 0, 10, 47, 4.0),
+    (1, "radar", 0, 10, 47, 3.0),
+]
+
 
 def _object_tracks_series() -> Series:
     return Series(
@@ -138,6 +147,70 @@ def test_entity_event_in_report_populates_entity_key(spark, basic_narrow_db):
     dim_rows = my_report.event_metadata_dfs["ENTITY_EVENT"].collect()
     assert len(dim_rows) == 1
     assert dim_rows[0].event_name == "close_object"
+
+
+def test_signal_isin_keeps_same_entity_id_distinct_per_signal(spark, basic_narrow_db):
+    """A signal filter keeps the same object id distinct per signal and prunes
+    the rest — end-to-end through determine_report (exercises the source prune).
+
+    Object 47 is seen by lidar, fusion, and radar in one container/window.
+    `sensor_type.isin(["lidar","fusion"])` must yield TWO entity rows — lidar-47
+    and fusion-47 (entity keys are signal-scoped, never merged) — and drop
+    radar-47 entirely.
+    """
+    impulse_config = ImpulseConfig(
+        source=Source(
+            container_metrics_table="spark_catalog.silver.container_metrics",
+            channel_metrics_table="spark_catalog.silver.channel_metrics",
+            channels_uri="spark_catalog.silver.channels",
+        ),
+        unity_sink=UnitySink(catalog="spark_catalog", schema="gold", table_prefix="signal_filter_test"),
+        container_filters=ContainerFilters(
+            metric_filters=[
+                [
+                    MetricFilter(
+                        column_name="vehicle_key", comparator=Comparator.EQ, value="Seat_Leon"
+                    ),
+                    MetricFilter(
+                        column_name="start_dt",
+                        comparator=Comparator.GE,
+                        value="2025-07-03T07:00:00.000Z",
+                    ),
+                ]
+            ]
+        ),
+        query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
+        measurement_dimensions=[
+            MeasurementDimensions.CONTAINER_ID,
+            MeasurementDimensions.START_TS,
+            MeasurementDimensions.STOP_TS,
+        ],
+    )
+
+    my_report = Report(
+        name="signal_filter_report",
+        spark=spark,
+        workspace_client=create_autospec(WorkspaceClient),
+        config=dict(impulse_config),
+    )
+    db = my_report.get_db()
+    db.register_series(
+        _object_tracks_series(),
+        lambda spark: spark.createDataFrame(_SAME_ID_THREE_SIGNALS_ROWS, _OBJECT_TRACKS_SCHEMA),
+    )
+    ot = db.query.series("object_tracks")
+    expr = (ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)).entity_condition()
+    my_report.add_event(EntityEvent(name="close_object", expr=expr))
+
+    my_report.determine_report()
+    rows = [r for r in my_report.event_dfs["ENTITY_EVENT"]["changed"].collect() if r.container_id == 1]
+
+    # lidar-47 and fusion-47 are two distinct entities; radar-47 is pruned.
+    assert len(rows) == 2
+    assert {r.entity_key for r in rows} == {
+        '{"object_tracks": {"lidar": ["47"]}}',
+        '{"object_tracks": {"fusion": ["47"]}}',
+    }
 
 
 def test_reduced_path_entity_key_matches_raw_frame_oracle(spark, basic_narrow_db):

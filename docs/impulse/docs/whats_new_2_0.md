@@ -1,6 +1,6 @@
 ---
 sidebar_position: 3
-title: What's New in 2.0
+title: What's New & Upgrading in 2.0
 ---
 
 # What's New in Impulse 2.0
@@ -17,9 +17,10 @@ data (camera, lidar, radar detections) that 1.0's scalar channels couldn't
 represent. Series make that data queryable, and the rest of this page is the
 generalization that fell out of it.
 
-Everything from 1.0 still works exactly as before. 2.0 is purely additive: it
-opens up a new data shape without changing anything you already do. (If you just
-want to know whether upgrading is safe, see the [Upgrade Guide](upgrade_1_to_2.md).)
+**Everything from 1.0 still works exactly as before — 2.0 is purely additive.**
+It opens a new data shape without changing anything you already do. The
+[Upgrading from 1.0](#upgrading-from-10) section below is the short answer to
+"is it safe to bump the version?" (yes).
 
 ---
 
@@ -99,10 +100,56 @@ entities — so nothing had to be rebuilt. Series sit alongside channels.
 
 ---
 
+## Upgrading from 1.0
+
+**Short version: it's safe. Upgrade without changing any of your code.** Your
+channel queries, your events, and your reports run unchanged and produce the same
+results. There are **no renamed APIs** to chase and **no deprecation warnings** to
+fix — everything in the table above behaves exactly as it did in 1.0.
+
+### Will anything behave differently if I just bump the version?
+
+Your **query results are identical.** There is one correctness fix in 2.0
+(interval union with a fully-contained interval), but it lives on a code path
+that channel data never reaches — channel intervals always have non-decreasing
+ends, so the old bug could not occur for channel queries.
+
+The **one thing that changes is the shape of the event output table**, and it
+changes in a way that doesn't break existing logic:
+
+1. **A new `entity_key` column** appears on the event fact table
+   (`event_instance_fact`). For all of your existing event types it is always
+   `NULL`. It only carries a value for the new `EntityEvent` type.
+2. **`event_instance_id` is now a `bigint`** (it was an `int`). The values were
+   always produced as 64-bit anyway; the declared type now matches.
+
+Impulse evolves your existing table automatically on the first 2.0 write — **both**
+persist paths handle it: the `replaceWhere` write (changed event definitions) and
+the `MERGE` write (unchanged / incremental definitions, the steady-state path).
+There is no manual migration: existing rows read back with `entity_key = NULL`,
+and the widened column is reconciled before the write so existing values are
+preserved (they were always 64-bit, so nothing truncates).
+
+**Incremental and repeated runs are safe.** The event instance IDs that match a
+row to its previous version on re-run are computed exactly as in 1.0 for all
+existing event types — the new `entity_key` is folded in only for `EntityEvent`.
+Re-running a 1.0 report won't duplicate rows or break the merge.
+
+### Upgrade checklist
+
+- [ ] Bump the Impulse version.
+- [ ] Run your existing reports — results match 1.0.
+- [ ] If anything *downstream* of Impulse pins the `event_instance_fact` schema (a
+      typed Spark view, a BI model), add the nullable `entity_key` column and
+      declare `event_instance_id` as `bigint`. If your downstream reads the table
+      as-is, there's nothing to do.
+- [ ] That's it. When you're ready for the new capabilities, see the
+      [User Guide](user_guide_2_0.md).
+
+---
+
 ## Where to go next
 
-- **[Upgrade Guide](upgrade_1_to_2.md)** — is it safe to upgrade without
-  touching my code? (Short answer: yes.)
 - **[User Guide](user_guide_2_0.md)** — channels vs series, the metadata tables,
   querying multiple tables, what's required vs optional.
 - **[Series reference](references/series.md)** — the deep dive: registration

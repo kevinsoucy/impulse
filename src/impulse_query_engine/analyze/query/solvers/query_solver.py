@@ -267,12 +267,37 @@ class QuerySolver(ABC):
             ]
         )
 
+    @staticmethod
+    def _source_signal_filter(leaves) -> frozenset | None:
+        """Signal values worth reading at the source for this series, or ``None``
+        if every signal must be read.
+
+        The union of the leaves' enumerable signal constraints — but ``None`` (no
+        prune) as soon as any leaf is signal-unconstrained, since a row of any
+        signal could then match that leaf. Conservative by construction: it only
+        ever drops signals **no** leaf can match, so it never changes results.
+        The exact per-row predicate still runs in the reduction UDF.
+        """
+        allowed: set = set()
+        for leaf in leaves:
+            values = getattr(leaf, "signal_values", None)
+            if values is None:
+                return None
+            allowed |= values
+        return frozenset(allowed)
+
     def _reduce_series(
         self, spark, series, source_factory, leaves, stop_df, container_ids, cid
     ) -> DataFrame:
         """Reduce one series to ``(container, leaf_key, signal, entity, intervals)``
         rows, applying each leaf's predicate per ``(container, signal, entity)``."""
         df = source_factory(spark)
+        # Source-read signal prune (Delta file/partition skipping): drop signals
+        # no leaf can match before the join/shuffle. Uses the physical signal
+        # column name, so it must precede the session_col -> cid rename below.
+        allowed_signals = self._source_signal_filter(leaves)
+        if allowed_signals is not None:
+            df = df.filter(F.col(series.signal_col).isin(sorted(allowed_signals, key=str)))
         if series.session_col != cid:
             df = df.withColumnRenamed(series.session_col, cid)
         if container_ids is not None:
