@@ -1,0 +1,46 @@
+# PandaSet adapter config.
+#
+# PandaSet from Hesai Technology / Scale AI (released 2020).
+# License: CC BY 4.0 — the cleanest commercial license of any top-tier ADAS
+# dataset (no ShareAlike, no NoDerivatives, no non-commercial restriction).
+# Useful as a fallback if ZOD's BY-SA 4.0 ShareAlike clause is flagged by legal.
+#
+# 103 sequences × 8 seconds × 10 Hz ≈ 80 GB total. Smallest of the four
+# adapters; pipeline runs end-to-end on Databricks serverless in under 10 min.
+adapter_name: pandaset
+
+dataset_versions:
+  - v1
+default_version: v1
+
+# Dataroot layout (matches the pandaset-devkit's expected tree):
+#   {dataroot}/{sequence_id}/
+#     annotations/cuboids/{frame_index:02d}.pkl.gz
+#     camera/{cam_*}/{frame_index:02d}.jpg
+#     camera/{cam_*}/intrinsics.json
+#     camera/{cam_*}/poses.json
+#     lidar/{frame_index:02d}.pkl.gz
+#     lidar/poses.json
+#     meta/gps.csv
+#     meta/timestamps.json
+dataroot_template: "{vroot}/raw/pandaset"
+
+# OpenLABEL package metadata strings (03_per_event_detail.py).
+openlabel:
+  annotator: pandaset_ground_truth
+  exporter: lakevision-demo/byod/adapters/pandaset
+  stream_description_prefix: "PandaSet "
+
+# Format hints for 04_visualize.py.
+visualize_format:
+  lidar_dtype: float32       # PandaSet stores LiDAR as a pandas DataFrame in
+                             # gzip-pickle form; we coerce to float32 for the
+                             # generic visualizer
+  lidar_stride: 6            # x, y, z, intensity, timestamp, d (sensor_id 0|1)
+  camera_reader: pil         # camera/cam_*/{N}.jpg → PIL.Image.open
+  lidar_reader: pickle_gz    # pd.read_pickle(gzip.open(path)) → DataFrame
+
+# Runtime python deps. PandaSet's published SDK is `pandaset` on PyPI but the
+# adapter reads `.pkl.gz` files directly via pandas — pandas is already in the
+# Databricks runtime so no extra deps are needed.
+python_deps: []

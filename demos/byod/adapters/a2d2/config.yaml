@@ -1,0 +1,45 @@
+# A2D2 adapter config.
+#
+# A2D2 = Audi Autonomous Driving Dataset (Geyer et al. 2020).
+# License: CC BY-ND 4.0. NoDerivatives applies to *redistributed* derivative
+# datasets, not to internal demo/platform use where the data is consumed.
+#
+# Variants:
+#   camera_lidar_semantic_bboxes — labeled subset with 3D bbox annotations
+#                                  (~12,499 frames across ~38 scenes; ~400 GB)
+#                                  This is what the adapter targets — the
+#                                  unlabeled and segmentation-only subsets are
+#                                  not consumed by the perception pipeline.
+adapter_name: a2d2
+
+dataset_versions:
+  - camera_lidar_semantic_bboxes
+default_version: camera_lidar_semantic_bboxes
+
+# Dataroot layout (post-extraction):
+#   {dataroot}/
+#     cams_lidars.json                          # sensor calibration
+#     camera_lidar_semantic_bboxes/
+#       {YYYYMMDD_HHMMSS}/                      # scene
+#         camera/{cam_*}/{*.png}
+#         lidar/{cam_*}/{*.npz}
+#         label3D/{cam_*}/{*.json}
+#         bus/{bus_signals.json}
+dataroot_template: "{vroot}/raw/a2d2/{version}"
+
+# OpenLABEL package metadata strings (03_per_event_detail.py).
+openlabel:
+  annotator: a2d2_ground_truth
+  exporter: lakevision-demo/byod/adapters/a2d2
+  stream_description_prefix: "A2D2 "
+
+# Format hints for 04_visualize.py.
+visualize_format:
+  lidar_dtype: float32        # A2D2 NPZ stores float32 point arrays
+  lidar_stride: 3             # x, y, z per point (NPZ key "pcloud_points")
+  camera_reader: pil          # cam_*/*.png → PIL.Image.open
+  lidar_reader: npz           # np.load(path)["pcloud_points"]
+
+# Runtime python dependencies. A2D2 has no official Python SDK — adapter reads
+# JSON + NPZ + PNG via stdlib + numpy + Pillow, all already in the runtime.
+python_deps: []
