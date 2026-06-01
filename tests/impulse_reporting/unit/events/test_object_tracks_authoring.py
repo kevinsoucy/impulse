@@ -38,7 +38,7 @@ from impulse_query_engine.surfaces import Series, SeriesAccessor
 from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
 from impulse_query_engine.surfaces.series_selector import SeriesSelector
 from impulse_reporting.events.basic_event import BasicEvent
-from impulse_reporting.events.entity_event import EntityEvent
+from impulse_reporting.events.entity_event import EntityEvent, _eval_tree
 
 
 def _mk_cache(series_frames, container_stop_ts, channel_cache=None):
@@ -228,6 +228,42 @@ def test_close_cyclist_intersected_with_ego_fast_window(drive_42_cache, ot):
 
 def _near_miss_per_object(ot):
     return ((ot.detection_class == 1) & (ot.distance_m < 8.0)).entity_condition()
+
+
+def test_eval_tree_op_dispatch_matches_build(drive_42_cache, ot):
+    # The per-entity evaluator must dispatch ops identically to TimeSeriesOp.build
+    # (both route through the shared apply_op). With no pins, walking a composed
+    # op tree must equal building it — this is the guard against the two
+    # evaluators drifting on optype handling.
+    a = (ot.detection_class == 1).entity_condition()
+    b = (ot.distance_m < 8.0).entity_condition()
+    expr = a & b
+    assert isinstance(expr, TimeSeriesOp)
+
+    built = expr.build(drive_42_cache)
+    walked = _eval_tree(expr, {}, drive_42_cache)
+
+    nptest.assert_array_equal(walked.tstarts, built.tstarts)
+    nptest.assert_array_equal(walked.tends, built.tends)
+
+
+def test_eval_tree_routes_udf_through_apply_op(drive_42_cache, ot):
+    # A TimeSeriesUDF overrides apply_op; the per-entity evaluator must invoke it
+    # exactly as build() does (this is the latent drift the unification fixes —
+    # previously _eval_tree never reached TimeSeriesUDF's overridden dispatch).
+    leaf = (ot.distance_m < 8.0).entity_condition()
+    udf = leaf.apply(lambda intervals: intervals)
+
+    built = udf.build(drive_42_cache)
+    walked = _eval_tree(udf, {}, drive_42_cache)
+
+    # Both eval paths agree, and the identity UDF returns the leaf's own
+    # presence intervals unchanged (non-empty, proving the UDF actually ran).
+    leaf_built = leaf.build(drive_42_cache)
+    assert len(built) > 0
+    nptest.assert_array_equal(built.tstarts, leaf_built.tstarts)
+    nptest.assert_array_equal(walked.tstarts, built.tstarts)
+    nptest.assert_array_equal(walked.tends, built.tends)
 
 
 def test_entity_event_emits_one_row_per_cyclist(ot):

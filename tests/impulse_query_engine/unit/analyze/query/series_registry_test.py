@@ -215,6 +215,31 @@ def test_valid_signals_rejects_unknown_signal(spark):
     assert "object_tracks" not in db.registered_series()
 
 
+def test_valid_signals_flags_null_signal_as_unknown(spark):
+    # A NULL signal value cannot match any allowed value, so it is flagged (it
+    # would be undroppable garbage at query time). Locks the anti-join's NULL
+    # handling to the prior set-difference behavior.
+    nullable_schema = T.StructType(
+        [
+            T.StructField("container_id", T.LongType(), nullable=False),
+            T.StructField("sensor_type", T.StringType(), nullable=True),
+            T.StructField("frame_ts", T.LongType(), nullable=False),
+            T.StructField("entity_id", T.LongType(), nullable=False),
+            T.StructField("distance_m", T.DoubleType()),
+        ]
+    )
+    db = _db()
+    rows = [(1, "lidar", 0, 47, 5.0), (1, None, 1, 48, 4.0)]
+    with pytest.raises(ValueError, match="not in the provided signal metadata"):
+        db.register_series(
+            _object_tracks(),
+            lambda spark: spark.createDataFrame(rows, nullable_schema),
+            valid_signals={"lidar"},
+            spark=spark,
+        )
+    assert "object_tracks" not in db.registered_series()
+
+
 def test_valid_signals_without_spark_raises():
     db = _db()
     with pytest.raises(ValueError, match="needs a spark session"):

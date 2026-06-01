@@ -3,8 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
+import pyspark.sql.functions as F
+import pyspark.sql.types as T
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
+
+# Cap on how many offending signal values the validation error lists. Bounds the
+# driver collect — we only need a few examples to make the message actionable.
+_MAX_UNKNOWN_SIGNALS_IN_ERROR = 20
 
 from impulse_query_engine import __version__
 from impulse_query_engine.telemetry import verify_workspace_client
@@ -145,10 +151,29 @@ class MeasurementDB:
                 f"register_series({series.name!r}, valid_signals=...) needs a spark "
                 "session to read the source data for signal-metadata validation."
             )
-        allowed = set(valid_signals)
+        allowed = list(valid_signals)
         df = source_factory(spark)
-        present = {row[0] for row in df.select(series.signal_col).distinct().collect()}
-        unknown = present - allowed
+        sig = series.signal_col
+        # Anti-join the source's signal column against the allowed set instead of
+        # collecting the full distinct set to the driver: Spark can stop after the
+        # first few offending rows (limit), there is no distinct shuffle, and only
+        # a bounded sample is materialized. The check stays eager and exact —
+        # fail-fast is preserved. A NULL signal never matches an allowed value, so
+        # it surfaces as unknown, exactly as the prior set-difference did.
+        sig_type = df.select(sig).schema[0].dataType
+        allowed_df = spark.createDataFrame(
+            [(value,) for value in allowed],
+            T.StructType([T.StructField(sig, sig_type, True)]),
+        )
+        unknown = {
+            row[0]
+            for row in (
+                df.select(F.col(sig))
+                .join(F.broadcast(allowed_df), on=sig, how="left_anti")
+                .limit(_MAX_UNKNOWN_SIGNALS_IN_ERROR)
+                .collect()
+            )
+        }
         if unknown:
             raise ValueError(
                 f"Series {series.name!r} carries signal value(s) "

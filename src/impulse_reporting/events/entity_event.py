@@ -90,10 +90,10 @@ def _eval_tree(
             )
             for k, v in expr.kwargs.items()
         }
-        if expr.optype == "cls":
-            op = getattr(args[0], expr.operation)
-            return op(*args[1:], **kwargs)
-        return expr.operation(*args, **kwargs)
+        # Reuse the op's own dispatch (shared with TimeSeriesOp.build) so this
+        # evaluator can't drift on optype handling, and a build-overriding op
+        # like TimeSeriesUDF is invoked the same way build() would.
+        return expr.apply_op(args, kwargs)
     # Not a pinned leaf and not an op: a channel/scalar leaf → evaluate via cache.
     # These do not vary per entity, so memoize across combinations when asked.
     if build_cache is None:
