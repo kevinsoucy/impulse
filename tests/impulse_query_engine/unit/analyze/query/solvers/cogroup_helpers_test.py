@@ -181,6 +181,7 @@ def test_channel_cache_cls_per_solver():
 
 
 def test_channel_cache_cls_unsupported_solver_raises():
-    # BlobSolver (RDD-based) has no inline channel cache → series queries fail loud.
-    with pytest.raises(NotImplementedError, match="registered-series"):
+    # BlobSolver (RDD-based) has no inline channel cache → series queries fail
+    # loud with an actionable message naming the solvers that support them.
+    with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
         BlobSolver()._channel_cache_cls()

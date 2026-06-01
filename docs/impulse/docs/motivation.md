@@ -47,6 +47,13 @@ high_rpm = (eng_rpm > 2000) & (eng_rpm < 5000)
 
 No complex joins or complex PySpark code is needed.
 
+A subtle but important point: an event expression does not yield a value at every
+timestamp -- it yields the **time windows** during which the condition held.
+Those windows are themselves composable. Combining them with `&`, `|`, and `~`
+expresses that several conditions overlapped, alternated, or excluded one another
+in time. Answering *when* a situation occurred across an entire campaign stays a
+single readable expression rather than a hand-written scan.
+
 ### Bridging Domain Logic and Distributed Computing
 
 Domain experts, think in terms of **channels**, **events**, and **aggregations**.
@@ -89,6 +96,36 @@ With the out of the box support for interpolation, resampling, and windowing ope
 channels with different sampling rates, derive new signals, and define complex events.
 
 This is necessary to truly be able to understand and analyze the recorded data and identify areas of interest for further investigation.
+
+### Events Across Independent Signals and Entities
+
+Not every question lives in a single channel. A situation of interest often arises
+only when independent signals coincide -- one subsystem crossing a threshold while
+another holds a particular state. Because every event expression evaluates to time
+windows, Impulse composes them directly: the overlap of two independent conditions
+is itself an event, written as one expression.
+
+Measurement data is also increasingly dense. Alongside scalar channels, domains
+such as ADAS object detection, industrial defect inspection, or ECU diagnostics
+produce **per-frame tables**, where many entities -- detected objects, inspection
+stations, individual control units -- share the same timestamp, each carrying its
+own row of attributes. Impulse registers such a table as a **series** in a few
+lines, and domain experts author the same predicate expressions over it as over
+channels:
+
+```python
+ot = db.query.series('object_tracks')
+
+# A close cyclist while the ego vehicle is moving fast
+cyclist_close = (ot.detection_class == 1) & (ot.distance_m < 8.0)
+near_miss_at_speed = (db.query.signal('Vehicle Speed Sensor') > 30) & cyclist_close
+```
+
+Crucially, a series can report not only *whether* a situation occurred, but *which*
+entity was involved and when. A near-miss is traced back to the specific object
+that triggered it, and when several entities trigger within the same window, each
+is reported on its own. This turns fleet-scale recordings into precise,
+entity-level findings without leaving the declarative API.
 
 ## The Vision
 

@@ -42,6 +42,14 @@ class QuerySolver(ABC):
     not only ``container_id``.
     """
 
+    # Whether this solver can resolve registered-series leaves (the cogroup
+    # path: per-series reduction + channel cache, keyed off a SolverConfig). The
+    # grouped-map solvers (Delta, KVS) set this True; BlobSolver leaves it False
+    # — it has none of that machinery — so a registered-series query is rejected
+    # at the QueryBuilder boundary with a clear message instead of failing deep
+    # in the reduction.
+    supports_registered_series: bool = False
+
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
 
@@ -211,7 +219,10 @@ class QuerySolver(ABC):
         fails loudly rather than silently dropping channel leaves.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} does not support registered-series queries."
+            f"{type(self).__name__} cannot resolve channel leaves alongside "
+            "registered series in a single query. Use DeltaSolver or "
+            "KeyValueStoreSolver for queries that combine channels and registered "
+            "series, or drop the channel leaf to run a series-only query."
         )
 
     def _read_prepared_channels(self, spark, query) -> DataFrame:
@@ -456,6 +467,12 @@ class QuerySolver(ABC):
         cid = self.config.container_id_col
         col_map = self.config.col_map
 
+        # Resolve the channel cache up front so a solver that cannot resolve
+        # channel leaves in the cogroup (e.g. BlobSolver) fails fast with a clear
+        # message, before any reduction work — rather than deep inside the
+        # has_channel_leaves branch below. Series-only queries never need it.
+        channel_cache_cls = self._channel_cache_cls() if has_channel_leaves else None
+
         # Stable per-leaf key shared by the reduction stage and per_container (same
         # leaf objects are referenced by both; mutated once here in the driver).
         for i, leaf in enumerate(series_leaves):
@@ -497,7 +514,7 @@ class QuerySolver(ABC):
                 QuerySolver._reduced_cogroup_udf,
                 per_container=per_container,
                 col_map=col_map,
-                cache_cls=self._channel_cache_cls(),
+                cache_cls=channel_cache_cls,
             )
             return (
                 channels_df.groupBy(cid)
@@ -585,14 +602,23 @@ class QuerySolver(ABC):
         frame closes at session end. ``None`` leaves the last frame open (it
         collapses to zero length and drops) — the pre-existing behaviour when no
         stop timestamp is configured.
+
+        Aggregates to exactly one row per container (``max`` = the latest stop,
+        i.e. session end). A ``.distinct()`` here would keep every distinct stop
+        value, so a ``container_metrics`` frame with more than one row per
+        container (e.g. resolved at a finer grain, or duplicated upstream) would
+        fan out the left join in :meth:`_reduce_series` and double-count the
+        series rows. ``max`` ignores NULL stops; a container whose only stop is
+        NULL yields a NULL ``__red_stop`` (its last frame stays open, as if no
+        stop were configured).
         """
         cid = self.config.container_id_col
         stop_col = self.config.container_stop_ts_col
         if container_metrics_df is None or stop_col not in container_metrics_df.columns:
             return None
-        return container_metrics_df.select(
-            F.col(cid), F.col(stop_col).cast("double").alias("__red_stop")
-        ).distinct()
+        return container_metrics_df.groupBy(F.col(cid)).agg(
+            F.max(F.col(stop_col).cast("double")).alias("__red_stop")
+        )
 
     @abc.abstractmethod
     def filter_container_tags(self, spark, query) -> DataFrame:

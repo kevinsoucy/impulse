@@ -77,6 +77,8 @@ class DeltaTimeSeriesCache(SeriesCache):
 
 
 class DeltaSolver(QuerySolver):
+    supports_registered_series = True
+
     def __init__(
         self,
         spark,

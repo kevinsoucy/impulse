@@ -60,6 +60,8 @@ class _PartialPredicate(TimeSeriesExpression):
         self._series = series
         self._predicate = predicate
         self._description = description
+        # Memoized presence finalization (see _finalize_presence).
+        self._presence_selector: "SeriesSelector | None" = None
 
     @property
     def description(self) -> str:
@@ -129,8 +131,20 @@ class _PartialPredicate(TimeSeriesExpression):
         return self._to_selector(entity_scoped=True)
 
     def _finalize_presence(self) -> "SeriesSelector":
-        """Finalize as a presence leaf (no per-entity scope)."""
-        return self._to_selector(entity_scoped=False)
+        """Finalize as a presence leaf (no per-entity scope).
+
+        Memoized so leaf collection (``get_selectors``) and evaluation
+        (``build``) return the *same* selector instance. The cogroup stamps a
+        per-solve ``_reduce_key`` on the collected leaf; if ``build`` finalized a
+        fresh selector instead, its ``_reduce_key`` would be ``None`` → the
+        reduced cache lookup misses → the cache falls back to an empty frame and
+        the predicate silently never matches. Sharing one instance keeps the
+        stamped key visible at build time (it is pickled along with this partial,
+        which holds the selector as an attribute).
+        """
+        if self._presence_selector is None:
+            self._presence_selector = self._to_selector(entity_scoped=False)
+        return self._presence_selector
 
     def _to_selector(self, *, entity_scoped: bool) -> "SeriesSelector":
         from impulse_query_engine.surfaces.series_selector import SeriesSelector

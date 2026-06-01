@@ -145,6 +145,30 @@ class TestCrossSeriesCogroup:
         assert by_container[3] == [[0.0, 10.0]]
         assert by_container[2] == []
 
+    def test_bare_presence_partial_in_select_returns_intervals(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # A partial finalized as a *presence* check (no .entity_condition())
+        # placed directly in select() must still resolve through the reduced
+        # cogroup. Before the memoization fix, get_selectors()/build() finalized
+        # different SeriesSelector instances, so the _reduce_key stamped on the
+        # collected leaf was invisible at build time — the reduced lookup missed,
+        # the cache fell back to an empty frame, and the predicate silently
+        # returned [] for every container.
+        _register_object_tracks(key_value_store_db)
+        solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
+        query = key_value_store_db.query
+        near = (query.series("object_tracks").distance_m < 8.0).alias("near")
+
+        result = query.select(near).solve(spark=spark, solver=solver)
+        by_container = {r.container_id: r["near"] for r in result.collect()}
+
+        assert set(by_container) == {1, 2, 3}
+        # Presence: a close object holds [0, 10) in 1 and 3; container 2 (99m) is empty.
+        assert by_container[1] == [[0.0, 10.0]]
+        assert by_container[3] == [[0.0, 10.0]]
+        assert by_container[2] == []
+
     def test_channels_and_series_cogroup_returns_both_columns(
         self, spark: SparkSession, key_value_store_db: MeasurementDB
     ):
@@ -407,6 +431,81 @@ class TestCrossSeriesEdgeCases:
 
         # [f0, f1) ∪ [f1, stop_ts) merges to one interval [f0, stop_ts).
         assert by_container[1] == [[float(f0), float(stop_ts)]]
+
+    def test_bare_presence_partial_point_in_time_closes_at_stop_ts(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # #3/#4: a bare presence partial (no .entity_condition()) on a
+        # point-in-time series must resolve through the reduced cogroup AND close
+        # the last frame at container_stop_ts — exercising the memoization fix on
+        # the point-in-time interval-synthesis path (not just RLE).
+        db = key_value_store_db
+        stop_ts = {
+            r["container_id"]: r["stop_ts"]
+            for r in db.container_metrics(spark).select("container_id", "stop_ts").collect()
+        }[1]
+        f0, f1 = stop_ts - 200, stop_ts - 100
+        _register_pit_tracks(db, rows=[(1, "lidar", f0, 47, 5.0), (1, "lidar", f1, 47, 4.0)])
+        solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
+        query = db.query
+        near = (query.series("pit_tracks").distance_m < 8.0).alias("near")
+
+        result = query.select(near).solve(spark=spark, solver=solver)
+        by_container = {r.container_id: r["near"] for r in result.collect()}
+
+        assert by_container[1] == [[float(f0), float(stop_ts)]]
+
+    def test_bare_presence_partial_with_channel_leaf_cogroups(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # #3/#4: a bare presence partial alongside a channel leaf drives the
+        # has_channel_leaves cogroup branch (the channel cache path), a different
+        # route than the series-only branch. The presence predicate must still
+        # resolve through the reduced cache.
+        _register_object_tracks(key_value_store_db)
+        solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
+        query = key_value_store_db.query
+        rpm = query.channel(channel_name="Engine RPM").mean().alias("rpm_mean")
+        near = (query.series("object_tracks").distance_m < 8.0).alias("near")
+
+        result = query.select(rpm, near).solve(spark=spark, solver=solver)
+        rows = {r.container_id: r for r in result.collect()}
+
+        assert rows[1]["rpm_mean"] is not None
+        assert rows[1]["near"] == [[0.0, 10.0]]  # close object present
+        assert rows[2]["near"] == []  # only a far object (99m)
+
+    def test_blob_solver_rejects_series_plus_channel_query(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # BlobSolver has no cogroup machinery, so any registered-series query
+        # must fail fast at the QueryBuilder boundary with a clear, actionable
+        # message naming the solvers that support it — never a cryptic error deep
+        # in the reduction or a silently-empty result.
+        from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver
+
+        _register_object_tracks(key_value_store_db)
+        query = key_value_store_db.query
+        rpm = query.channel(channel_name="Engine RPM").mean().alias("rpm")
+        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+
+        with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
+            query.select(rpm, near).solve(spark=spark, solver=BlobSolver())
+
+    def test_blob_solver_rejects_series_only_query(
+        self, spark: SparkSession, key_value_store_db: MeasurementDB
+    ):
+        # Even a series-ONLY query is rejected on BlobSolver: it has no
+        # SolverConfig/reduction machinery, so it cannot resolve a registered
+        # series at all. The rejection is the same clear, early error.
+        from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver
+
+        _register_object_tracks(key_value_store_db)
+        query = key_value_store_db.query
+        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+
+        with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
+            query.select(near).solve(spark=spark, solver=BlobSolver())
 
     def test_signal_name_sugar_matches_channel_by_name(
         self, spark: SparkSession, key_value_store_db: MeasurementDB

@@ -26,12 +26,26 @@ _LEGACY_SCHEMA = T.StructType(
         T.StructField("end_ts", T.LongType(), False),
     ]
 )
+# A genuine 1.0-on-disk table: event_instance_id was IntegerType before crc32
+# outgrew int32 and it was widened to LongType in 2.0. The upgrade MERGE must
+# widen the existing column, not downcast the new (long) source values into it.
+_LEGACY_INT_SCHEMA = T.StructType(
+    [
+        T.StructField("container_id", T.IntegerType(), False),
+        T.StructField("event_instance_id", T.IntegerType(), False),
+        T.StructField("event_id", T.IntegerType(), False),
+        T.StructField("start_ts", T.LongType(), False),
+        T.StructField("end_ts", T.LongType(), False),
+    ]
+)
 # 2.0-shaped rows — adds the nullable entity_key.
 _NEW_SCHEMA = T.StructType(
     [*_LEGACY_SCHEMA.fields, T.StructField("entity_key", T.StringType(), True)]
 )
 
 _MERGE_KEYS = ["container_id", "event_id", "event_instance_id"]
+# The production event-fact merge key in 2.0 (report.py) — entity_key included.
+_ENTITY_MERGE_KEYS = [*_MERGE_KEYS, "entity_key"]
 _URI = "spark_catalog.gold.upsert_schema_evolution_test"
 
 
@@ -96,4 +110,154 @@ def test_upsert_without_overwrite_schema_does_not_evolve_legacy_table(spark):
     result = spark.table(uri)
     assert "entity_key" not in result.columns  # legacy schema left unevolved
     assert result.count() == 2  # row still inserts, just without entity_key
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+
+def test_upsert_widens_legacy_int_event_instance_id_to_long(spark):
+    # 1.0 -> 2.0 upgrade against a real 1.0 table whose event_instance_id is INT.
+    # withSchemaEvolution() only ADDS columns; it does not widen an existing
+    # column's type, so without the reconciliation step the long source values
+    # would downcast into the int32 column and overflow for any crc32 > 2**31-1.
+    uri = "spark_catalog.gold.upsert_int_widening_test"
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.gold")
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+    spark.createDataFrame([(1, 100, 7, 0, 10)], _LEGACY_INT_SCHEMA).write.format(
+        "delta"
+    ).saveAsTable(uri)
+    assert dict(spark.table(uri).dtypes)["event_instance_id"] == "int"
+
+    sink = UnityCatalogSink(
+        UnitySinkConfig(catalog_name="spark_catalog", schema_name="gold", table_prefix="")
+    )
+    big_id = 3_000_000_000  # > 2**31 - 1 (2_147_483_647): a realistic crc32 value
+    new_rows = spark.createDataFrame(
+        [
+            (1, 100, 7, 0, 10, None),  # updates the existing key
+            (2, big_id, 8, 5, 15, '{"object_tracks": {"lidar": ["47"]}}'),  # large id
+        ],
+        _NEW_SCHEMA,
+    )
+
+    sink.upsert(new_rows, uri, merge_keys=_MERGE_KEYS)
+
+    result = spark.table(uri)
+    # Column widened to bigint, and the > int32 value round-trips intact.
+    assert dict(result.dtypes)["event_instance_id"] == "bigint"
+    by_cid = {r.container_id: r for r in result.collect()}
+    assert set(by_cid) == {1, 2}
+    assert by_cid[2].event_instance_id == big_id
+    # The pre-existing int row survives the widening rewrite unchanged.
+    assert by_cid[1].event_instance_id == 100
+    # The source-introduced entity_key column was also added by reconciliation.
+    assert "entity_key" in result.columns
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+
+def test_upsert_mixed_basic_and_entity_rows_stay_distinct(spark):
+    # event_instance_fact is shared: BasicEvent rows carry entity_key=NULL,
+    # EntityEvent rows carry the JSON map. A basic row and an entity row that
+    # collide on (container_id, event_id, event_instance_id) must stay separate
+    # (a NULL entity_key never matches a populated one), and each must upsert
+    # idempotently on re-run — which requires the NULL-safe `<=>` so the basic
+    # row's NULL matches its own NULL instead of duplicating.
+    uri = "spark_catalog.gold.upsert_mixed_basic_entity_test"
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.gold")
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+    sink = UnityCatalogSink(
+        UnitySinkConfig(catalog_name="spark_catalog", schema_name="gold", table_prefix="")
+    )
+    entity_key = '{"object_tracks": {"lidar": ["47"]}}'
+    basic_row = (1, 700, 7, 0, 10, None)
+    entity_row = (1, 700, 7, 0, 10, entity_key)
+
+    sink.upsert(spark.createDataFrame([basic_row, entity_row], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    assert spark.table(uri).count() == 2  # collide on the id triple, kept distinct
+
+    # Re-run: each row updates in place; the NULL-entity_key basic row must not
+    # duplicate (it would under plain `=`, since NULL = NULL is never true).
+    sink.upsert(spark.createDataFrame([basic_row, entity_row], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    result = spark.table(uri)
+    assert result.count() == 2
+    assert {r.entity_key for r in result.collect()} == {None, entity_key}
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+
+def test_is_safe_widening_only_widens_within_a_numeric_family():
+    # The reconciliation helper must widen only same-family numeric promotions
+    # and never narrow or cross families (that would corrupt or wrongly rewrite
+    # an existing column).
+    widen = UnityCatalogSink._is_safe_widening
+
+    # Same family, strictly wider → allowed.
+    assert widen(T.IntegerType(), T.LongType())
+    assert widen(T.ByteType(), T.IntegerType())
+    assert widen(T.ShortType(), T.LongType())
+    assert widen(T.FloatType(), T.DoubleType())
+
+    # Same type → not a widening (no rewrite needed).
+    assert not widen(T.LongType(), T.LongType())
+    assert not widen(T.DoubleType(), T.DoubleType())
+
+    # Narrowing → refused.
+    assert not widen(T.LongType(), T.IntegerType())
+    assert not widen(T.DoubleType(), T.FloatType())
+
+    # Cross-family (int<->float, or to/from non-numeric) → refused.
+    assert not widen(T.IntegerType(), T.DoubleType())
+    assert not widen(T.LongType(), T.DoubleType())
+    assert not widen(T.IntegerType(), T.StringType())
+    assert not widen(T.StringType(), T.StringType())
+
+
+def test_upsert_entity_key_merge_key_keeps_colliding_entities_distinct(spark):
+    # event_instance_id folds entity_key into a 32-bit crc32, so two distinct
+    # entities can collide on (container_id, event_id, event_instance_id).
+    # Including entity_key in the merge key keeps them as separate rows instead
+    # of one silently overwriting the other.
+    uri = "spark_catalog.gold.upsert_entity_collision_test"
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.gold")
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+    sink = UnityCatalogSink(
+        UnitySinkConfig(catalog_name="spark_catalog", schema_name="gold", table_prefix="")
+    )
+    key_47 = '{"object_tracks": {"lidar": ["47"]}}'
+    key_88 = '{"object_tracks": {"lidar": ["88"]}}'
+
+    # Two entities that collide on the id triple but differ by entity_key.
+    sink.upsert(spark.createDataFrame([(1, 500, 7, 0, 10, key_47)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    sink.upsert(spark.createDataFrame([(1, 500, 7, 0, 10, key_88)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+
+    result = spark.table(uri)
+    assert result.count() == 2  # both entities preserved, not overwritten
+    assert {r.entity_key for r in result.collect()} == {key_47, key_88}
+
+    # Re-upserting entity 47 with a changed window updates in place (still 2 rows).
+    sink.upsert(spark.createDataFrame([(1, 500, 7, 0, 99, key_47)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    result = spark.table(uri)
+    assert result.count() == 2
+    by_key = {r.entity_key: r for r in result.collect()}
+    assert by_key[key_47].end_ts == 99  # updated
+    assert by_key[key_88].end_ts == 10  # untouched
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+
+def test_upsert_null_entity_key_is_idempotent(spark):
+    # BasicEvent rows carry a NULL entity_key and share the event-fact table.
+    # With entity_key in the merge key, the condition must be NULL-safe (`<=>`)
+    # so re-upserting the same row updates rather than duplicating it.
+    uri = "spark_catalog.gold.upsert_null_entity_key_test"
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.gold")
+    spark.sql(f"DROP TABLE IF EXISTS {uri}")
+
+    sink = UnityCatalogSink(
+        UnitySinkConfig(catalog_name="spark_catalog", schema_name="gold", table_prefix="")
+    )
+    row = [(1, 600, 7, 0, 10, None)]
+    sink.upsert(spark.createDataFrame(row, _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    sink.upsert(spark.createDataFrame(row, _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+
+    assert spark.table(uri).count() == 1  # NULL <=> NULL matched → updated, not duplicated
     spark.sql(f"DROP TABLE IF EXISTS {uri}")

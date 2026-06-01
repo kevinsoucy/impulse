@@ -258,7 +258,6 @@ wheels = [
 name = "databricks-impulse"
 source = { editable = "." }
 dependencies = [
-    { name = "delta-spark" },
     { name = "lz4" },
     { name = "nptyping" },
 ]
@@ -266,6 +265,7 @@ dependencies = [
 [package.optional-dependencies]
 local-dev = [
     { name = "databricks-sdk" },
+    { name = "delta-spark" },
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -290,7 +290,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "databricks-sdk", marker = "extra == 'local-dev'", specifier = "==0.106.0" },
-    { name = "delta-spark", specifier = "==4.0.1" },
+    { name = "delta-spark", marker = "extra == 'local-dev'", specifier = "==4.0.1" },
     { name = "lz4", specifier = "==4.4.5" },
     { name = "matplotlib", marker = "extra == 'local-dev'", specifier = "==3.10.0" },
     { name = "nptyping", specifier = "==2.5.0" },

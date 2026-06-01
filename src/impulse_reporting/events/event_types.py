@@ -20,11 +20,11 @@ class EventType(Enum):
     Attributes
     ----------
     ENTITY_EVENT : EntityEvent
-        Per-entity event type. Declared before ``BASIC_EVENT`` because
-        ``EntityEvent`` subclasses ``BasicEvent``: the ``isinstance``-based
-        grouping in ``Report._group_events_by_type`` matches the first enum
-        member an event is an instance of, so the more specific type must come
-        first or every ``EntityEvent`` would be misfiled as a ``BasicEvent``.
+        Per-entity event type. ``EntityEvent`` subclasses ``BasicEvent``;
+        ``Report._group_events_by_type`` routes each event to the *most specific*
+        matching type (by subclass relationship), so this declaration order is
+        cosmetic — an ``EntityEvent`` is dispatched as ``ENTITY_EVENT`` regardless
+        of where the members are declared.
     BASIC_EVENT : BasicEvent
         Basic event type for standard event processing.
     CONTAINER_EVENT : ContainerEvent

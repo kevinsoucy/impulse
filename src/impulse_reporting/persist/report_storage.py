@@ -240,7 +240,24 @@ class UnityCatalogSink(Sink):
             df.write.format("delta").option("overwriteSchema", overwrite_schema).saveAsTable(uri)
             return
 
-        merge_condition = " AND ".join([f"target.{k} = source.{k}" for k in merge_keys])
+        if overwrite_schema:
+            # Reconcile a pre-existing table's schema to the source *before* the
+            # MERGE, which keeps a 1.0 -> 2.0 upgrade non-breaking:
+            #   * widen a column whose source type is a wider numeric (e.g.
+            #     event_instance_id int32 -> int64 once crc32 outgrew int32) —
+            #     withSchemaEvolution does not widen existing column types, and a
+            #     plain MERGE would otherwise downcast/overflow the source value;
+            #   * add a column the source introduced (e.g. entity_key in 2.0) so a
+            #     merge key referencing it (target.entity_key) resolves — the
+            #     merge *condition* is analyzed against the target schema before
+            #     schema evolution can add the column.
+            self._reconcile_target_schema(df.sparkSession, uri, df)
+
+        # Null-safe equality so a merge key that is NULL on both sides matches
+        # (e.g. entity_key is NULL for BasicEvent rows sharing the event-fact
+        # table); plain `=` treats NULL = NULL as unknown and would duplicate
+        # those rows on every upsert. Identical to `=` for the non-null keys.
+        merge_condition = " AND ".join([f"target.{k} <=> source.{k}" for k in merge_keys])
 
         target = self._resolve_delta_table(df.sparkSession, uri)
         builder = (
@@ -250,14 +267,59 @@ class UnityCatalogSink(Sink):
             .whenNotMatchedInsertAll()
         )
         if overwrite_schema:
-            # Evolve the target schema so an additive nullable column added in a
-            # later release (e.g. `entity_key` in 2.0) is appended to a
-            # pre-existing table instead of raising a MERGE schema mismatch. This
-            # mirrors the replaceWhere path, which already evolves the schema via
-            # overwriteSchema, and is what keeps a 1.0 -> 2.0 upgrade non-breaking
-            # for reports persisted through the MERGE (unchanged-definition) path.
             builder = builder.withSchemaEvolution()
         builder.execute()
+
+    # Numeric types that may be safely widened in place, by family and rank.
+    # A target column may be widened to a source column of the same family with
+    # a strictly higher rank (e.g. integer -> long); no cross-family or
+    # narrowing promotion is ever performed.
+    _WIDENING_RANK = {
+        "byte": ("integer", 0),
+        "short": ("integer", 1),
+        "integer": ("integer", 2),
+        "long": ("integer", 3),
+        "float": ("floating", 0),
+        "double": ("floating", 1),
+    }
+
+    @classmethod
+    def _is_safe_widening(cls, current, target) -> bool:
+        """Whether *current* can be losslessly widened to *target* in place."""
+        cur = cls._WIDENING_RANK.get(current.typeName())
+        tgt = cls._WIDENING_RANK.get(target.typeName())
+        return bool(cur and tgt and cur[0] == tgt[0] and tgt[1] > cur[1])
+
+    def _reconcile_target_schema(self, spark: SparkSession, uri: str, source_df: DataFrame):
+        """Align an existing table's schema to *source_df* ahead of a MERGE.
+
+        Widens narrower numeric columns (a one-time table rewrite) and adds
+        columns the source introduced but the target lacks (a metadata-only
+        ``ALTER TABLE ADD COLUMNS``). A no-op once the schemas already agree, so
+        only the first write after an upgrade pays the cost.
+        """
+        target = spark.table(uri)
+        target_types = {field.name: field.dataType for field in target.schema.fields}
+
+        to_widen = {
+            field.name: field.dataType
+            for field in source_df.schema.fields
+            if field.name in target_types
+            and self._is_safe_widening(target_types[field.name], field.dataType)
+        }
+        if to_widen:
+            widened = target
+            for name, new_type in to_widen.items():
+                widened = widened.withColumn(name, F.col(name).cast(new_type))
+            widened.write.mode("overwrite").format("delta").option(
+                "overwriteSchema", "true"
+            ).saveAsTable(uri)
+            target_types = {**target_types, **to_widen}
+
+        missing = [f for f in source_df.schema.fields if f.name not in target_types]
+        if missing:
+            cols = ", ".join(f"`{f.name}` {f.dataType.simpleString()}" for f in missing)
+            spark.sql(f"ALTER TABLE {uri} ADD COLUMNS ({cols})")
 
     def replace_by_ids(
         self,

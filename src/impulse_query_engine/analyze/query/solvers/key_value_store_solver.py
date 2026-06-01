@@ -114,6 +114,8 @@ class KeyValueStoreSolver(QuerySolver):
         silver layer.
     """
 
+    supports_registered_series = True
+
     def __init__(
         self,
         spark,

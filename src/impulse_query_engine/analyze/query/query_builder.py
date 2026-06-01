@@ -311,6 +311,23 @@ class QueryBuilder:
             result_dtypes.append(dtype)
         return (result_objects, result_dtypes)
 
+    # NOTE (solver default — deferred cleanup): the default is BlobSolver only
+    # for backward compatibility. It is the original blob/channel solver and the
+    # only solver constructible with no arguments — DeltaSolver and
+    # KeyValueStoreSolver both require a SparkSession, which isn't available where
+    # a default argument is evaluated (import time), so neither can sit here. It
+    # cannot run registered-series queries; those are rejected with an actionable
+    # error by `_require_series_support`, and reports never use it (they pick
+    # Delta/KVS from config, defaulting to KVS). Two known improvements were
+    # intentionally NOT made, to avoid breaking the public channel-query API for
+    # external callers that rely on this default:
+    #   1. `solver: QuerySolver | None = None` + `solver = solver or BlobSolver()`
+    #      inside the body — same behaviour, but removes the mutable-default-
+    #      argument smell (one shared BlobSolver instance built at import).
+    #   2. Deriving the default from a configured solver — not possible today:
+    #      MeasurementDB carries no solver concept (the solver lives in the
+    #      report-layer ImpulseConfig), so this needs a larger refactor first.
+    # Same applies to `toPandas` below.
     @telemetry_logger("query", "solve")
     def solve(
         self,
@@ -326,7 +343,10 @@ class QueryBuilder:
         spark : SparkSession
             Spark session used for query execution.
         solver : QuerySolver, optional
-            Query solver to use (default is BlobSolver).
+            Query solver to use. Defaults to ``BlobSolver`` (channel/blob layout).
+            Registered-series queries require ``DeltaSolver`` or
+            ``KeyValueStoreSolver``; passing ``BlobSolver`` (incl. the default)
+            for a series query raises a clear error. See the maintainer note above.
         pre_filtered_containers_df : DataFrame, optional
             Pre-filtered container metrics DataFrame for incremental processing.
             When provided, only these containers will be processed.
@@ -348,6 +368,7 @@ class QueryBuilder:
 
         active_series = self._collect_active_series()
         if active_series:
+            self._require_series_support(solver)
             has_channel_leaves = bool(direct_selectors) or bool(aliased_selectors)
             return solver.solve_with_series(
                 spark,
@@ -417,6 +438,22 @@ class QueryBuilder:
             active_series[name] = (registry[name], self.db.series_source(name))
         return active_series
 
+    @staticmethod
+    def _require_series_support(solver) -> None:
+        """Reject a registered-series query on a solver that cannot run one.
+
+        Only the grouped-map solvers (Delta, KVS) implement the cogroup path;
+        ``BlobSolver`` has none of the required machinery (no ``SolverConfig``,
+        per-series reduction, or channel cache), so it is failed fast here with
+        an actionable message instead of erroring deep in the reduction.
+        """
+        if not getattr(solver, "supports_registered_series", False):
+            raise NotImplementedError(
+                f"{type(solver).__name__} does not support registered-series "
+                "queries. Use DeltaSolver or KeyValueStoreSolver for queries that "
+                "reference a registered series."
+            )
+
     def solve_series_apply(
         self,
         spark,
@@ -449,6 +486,7 @@ class QueryBuilder:
             self._run_filter_stages(spark, solver, pre_filtered_containers_df)
         )
         active_series = self._collect_active_series()
+        self._require_series_support(solver)
         has_channel_leaves = bool(direct_selectors) or bool(aliased_selectors)
         return solver.run_series_cogroup(
             spark,
@@ -462,6 +500,8 @@ class QueryBuilder:
             schema=schema,
         )
 
+    # See the solver-default maintainer note on `solve` above — same rationale
+    # and same deferred cleanup apply to this default.
     @telemetry_logger("query", "to_pandas")
     def toPandas(self, spark, solver: QuerySolver = BlobSolver()) -> pd.DataFrame:
         """
@@ -472,7 +512,9 @@ class QueryBuilder:
         spark : SparkSession
             Spark session used for query execution.
         solver : QuerySolver, optional
-            Query solver to use (default is BlobSolver).
+            Query solver to use. Defaults to ``BlobSolver``; registered-series
+            queries require ``DeltaSolver`` or ``KeyValueStoreSolver`` (see
+            ``solve``).
 
         Returns
         -------
