@@ -123,7 +123,7 @@ def test_entity_event_in_report_populates_entity_key(spark, basic_narrow_db):
         _object_tracks_series(),
         lambda spark: spark.createDataFrame(_OBJECT_TRACKS_ROWS, _OBJECT_TRACKS_SCHEMA),
     )
-    close_object = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close_object = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     my_report.add_event(EntityEvent(name="close_object", expr=close_object))
 
     my_report.determine_report()
@@ -136,8 +136,8 @@ def test_entity_event_in_report_populates_entity_key(spark, basic_narrow_db):
 
     # Containers 1 and 3 have a close object; container 2 (far) produces no row.
     assert set(by_container) == {1, 3}
-    assert by_container[1].entity_key == '{"object_tracks": {"lidar": ["47"]}}'
-    assert by_container[3].entity_key == '{"object_tracks": {"lidar": ["12"]}}'
+    assert by_container[1].entity_key == '{"object": {"lidar": ["47"]}}'
+    assert by_container[3].entity_key == '{"object": {"lidar": ["12"]}}'
     # Entity-attributed rows carry a real (non-sentinel) instance id and a valid window.
     for r in rows:
         assert r.start_ts < r.end_ts
@@ -199,7 +199,7 @@ def test_signal_isin_keeps_same_entity_id_distinct_per_signal(spark, basic_narro
         lambda spark: spark.createDataFrame(_SAME_ID_THREE_SIGNALS_ROWS, _OBJECT_TRACKS_SCHEMA),
     )
     ot = db.query.series("object_tracks")
-    expr = (ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)).entity_condition()
+    expr = (ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)).each().ids(as_="object")
     my_report.add_event(EntityEvent(name="close_object", expr=expr))
 
     my_report.determine_report()
@@ -208,8 +208,8 @@ def test_signal_isin_keeps_same_entity_id_distinct_per_signal(spark, basic_narro
     # lidar-47 and fusion-47 are two distinct entities; radar-47 is pruned.
     assert len(rows) == 2
     assert {r.entity_key for r in rows} == {
-        '{"object_tracks": {"lidar": ["47"]}}',
-        '{"object_tracks": {"fusion": ["47"]}}',
+        '{"object": {"lidar": ["47"]}}',
+        '{"object": {"fusion": ["47"]}}',
     }
 
 
@@ -273,7 +273,7 @@ def test_reduced_path_entity_key_matches_raw_frame_oracle(spark, basic_narrow_db
         _object_tracks_series(),
         lambda spark: spark.createDataFrame(_TWO_ENTITY_ROWS, _OBJECT_TRACKS_SCHEMA),
     )
-    close_object = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close_object = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     my_report.add_event(EntityEvent(name="close_object", expr=close_object))
 
     # Production reduced path.
@@ -291,7 +291,7 @@ def test_reduced_path_entity_key_matches_raw_frame_oracle(spark, basic_narrow_db
     )
     oracle_event = EntityEvent(
         name="close_object",
-        expr=(SeriesAccessor(_object_tracks_series()).distance_m < 8.0).entity_condition(),
+        expr=(SeriesAccessor(_object_tracks_series()).distance_m < 8.0).each().ids(as_="object"),
     )
     cache = CombinedSeriesCache(EmptyTimeSeriesCache(), {"object_tracks": raw_pdf})
     oracle = {
@@ -301,7 +301,7 @@ def test_reduced_path_entity_key_matches_raw_frame_oracle(spark, basic_narrow_db
 
     # Both entities (47, 88) close in container 1 → two rows, identical on both paths.
     assert reduced == oracle
-    assert {json.loads(ek)["object_tracks"]["lidar"][0] for *_, ek in reduced} == {"47", "88"}
+    assert {json.loads(ek)["object"]["lidar"][0] for *_, ek in reduced} == {"47", "88"}
 
 
 def test_colliding_entities_survive_unchanged_merge_persist(spark, basic_narrow_db, monkeypatch):
@@ -395,7 +395,7 @@ def test_colliding_entities_survive_unchanged_merge_persist(spark, basic_narrow_
         _object_tracks_series(),
         lambda spark: spark.createDataFrame(_TWO_ENTITY_ROWS, _OBJECT_TRACKS_SCHEMA),
     )
-    close_object = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close_object = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     my_report.add_event(EntityEvent(name="close_object", expr=close_object))
 
     my_report.determine_report()
@@ -414,8 +414,8 @@ def test_colliding_entities_survive_unchanged_merge_persist(spark, basic_narrow_
     # Both entities persisted as separate rows — neither clobbered by the other.
     assert len(rows) == 2
     assert {r.entity_key for r in rows} == {
-        '{"object_tracks": {"lidar": ["47"]}}',
-        '{"object_tracks": {"lidar": ["88"]}}',
+        '{"object": {"lidar": ["47"]}}',
+        '{"object": {"lidar": ["88"]}}',
     }
     # Confirm the collision actually fired: both rows share one event_instance_id,
     # so only entity_key in the merge key kept them distinct.

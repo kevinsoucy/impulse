@@ -85,7 +85,7 @@ class Series:
         interval. Both must be set together.
     entity_key : str or tuple of str, optional
         Per-entity identity column(s) (e.g. ``entity_id``). When set, the
-        series carries entity multiplicity and supports ``.entity_condition()``.
+        series carries entity multiplicity and supports ``.each()`` / ``.ids()``.
         ``None`` means one timeline per ``(session, signal)`` with no entity
         multiplicity (e.g. channels, IMU).
     """

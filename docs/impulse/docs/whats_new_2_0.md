@@ -47,14 +47,14 @@ objects at once. 2.0 lets you register that table as-is and query it.
 `==`, `isin`, `contains`, `startswith`, `endswith`, and regex `matches`.
 
 **3. Ask *which one* — not just *whether*.**
-A 1.0 event answers "did this ever happen in this recording?" An `EntityEvent`
-answers "*which* object / unit / driver triggered it?" and writes that identity
-into the output.
+A 1.0 event answers "did this ever happen in this recording?" Add `.ids(as_=…)` to a
+predicate and the event also records *which* object / unit / driver triggered it
+(use `.each()` for one window per entity).
 
 **4. Correlate two independent entities in time.**
 "A cyclist was close *while* a car decelerated sharply" — two different objects,
-overlapping in time. 1.0 had no way to express this; 2.0 does, with
-`.entity_condition()`.
+overlapping in time. 1.0 had no way to express this; 2.0 does, by composing two
+finalized predicates with `&`.
 
 **5. Query across several time-series tables at once.**
 Mix channels and multiple series in one expression with `&` and `|`. The engine
@@ -69,7 +69,7 @@ speed = db.query.signal("Vehicle Speed Sensor")  # a scalar channel
 # Speeding past a 30 sign with a cyclist close on lidar — all true at once.
 scenario = (sign.value == "30") & (speed > 30) & (
     (lidar.object_class == "cyclist") & (lidar.distance_m < 8.0)
-).entity_condition()
+).any()
 ```
 
 **Is there a limit on how many tables?** No fixed limit — add as many series as
@@ -122,8 +122,9 @@ The **one thing that changes is the shape of the event output table**, and it
 changes in a way that doesn't break existing logic:
 
 1. **A new `entity_key` column** appears on the event fact table
-   (`event_instance_fact`). For all of your existing event types it is always
-   `NULL`. It only carries a value for the new `EntityEvent` type.
+   (`event_instance_fact`). For all of your existing events it is always
+   `NULL`. It only carries a value when an event projects entity identity with
+   `.ids()` / `.each()`.
 2. **`event_instance_id` is now a `bigint`** (it was an `int`). The values were
    always produced as 64-bit anyway; the declared type now matches.
 
@@ -136,7 +137,8 @@ preserved (they were always 64-bit, so nothing truncates).
 
 **Incremental and repeated runs are safe.** The event instance IDs that match a
 row to its previous version on re-run are computed exactly as in 1.0 for all
-existing event types — the new `entity_key` is folded in only for `EntityEvent`.
+existing events — the new `entity_key` is folded in only when an event projects
+entity identity (`.ids()` / `.each()`).
 Re-running a 1.0 report won't duplicate rows or break the merge.
 
 ### Upgrade checklist

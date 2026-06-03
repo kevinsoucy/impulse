@@ -111,7 +111,7 @@ def test_query_series_returns_accessor_and_builds_leaf_keyed_by_name():
     acc = db.query.series("object_tracks")
     assert isinstance(acc, SeriesAccessor)
     # The authored leaf's leaf_kind is the series name (the cogroup routing key).
-    leaf = (acc.distance_m < 8.0).entity_condition()
+    leaf = (acc.distance_m < 8.0).each()
     assert leaf.leaf_kind == "object_tracks"
 
 

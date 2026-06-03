@@ -6,7 +6,7 @@ reduction — not just the query path. ``entity_event_report_test.py`` covers th
 single RLE-series case; this file adds:
 
 - a channel leaf ANDed with a series leaf through the report path;
-- ``per_entity_windowing=False`` (one combined union-map row);
+- ``.any().ids()`` merged windowing (one combined union-map row);
 - two EntityEvents dispatched in a single report;
 - a point-in-time series through the report path (the Spark ``tend`` precompute +
   ``container_stop_ts`` last-frame close, not just the RLE path);
@@ -138,7 +138,7 @@ def test_entity_event_channel_and_series_mix(spark, basic_narrow_db):
         lambda spark: spark.createDataFrame(_MIX_ROWS, _RLE_SCHEMA),
     )
     eng_rpm = db.query.channel(channel_name="Engine RPM")
-    close = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     expr = close & (eng_rpm > -1)
     report.add_event(EntityEvent(name="close_with_rpm", expr=expr))
 
@@ -146,14 +146,14 @@ def test_entity_event_channel_and_series_mix(spark, basic_narrow_db):
 
     by_container = {r.container_id: r for r in _entity_rows(report)}
     assert set(by_container) == {1, 3}
-    assert by_container[1].entity_key == '{"object_tracks": {"lidar": ["47"]}}'
-    assert by_container[3].entity_key == '{"object_tracks": {"lidar": ["12"]}}'
+    assert by_container[1].entity_key == '{"object": {"lidar": ["47"]}}'
+    assert by_container[3].entity_key == '{"object": {"lidar": ["12"]}}'
     for r in by_container.values():
         assert r.start_ts < r.end_ts
 
 
 # -----------------------------------------------------------------------------
-# (B.1b) per_entity_windowing=False — one combined union-map row per window
+# (B.1b) .any().ids() merged windowing — one combined union-map row per window
 # -----------------------------------------------------------------------------
 # Container 1 has two close entities; combined windowing must emit a SINGLE row
 # whose entity_key unions both ids (per-entity windowing would emit two rows).
@@ -172,8 +172,8 @@ def test_entity_event_combined_windowing_unions_entities(spark, basic_narrow_db)
         _rle_series(),
         lambda spark: spark.createDataFrame(_COMBINED_ROWS, _RLE_SCHEMA),
     )
-    close = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
-    report.add_event(EntityEvent(name="close_combined", expr=close, per_entity_windowing=False))
+    close = (db.query.series("object_tracks").distance_m < 8.0).any().ids(as_="object")
+    report.add_event(EntityEvent(name="close_combined", expr=close))
 
     report.determine_report()
 
@@ -184,9 +184,9 @@ def test_entity_event_combined_windowing_unions_entities(spark, basic_narrow_db)
     assert set(by_container) == {1, 3}
     # Combined windowing: exactly one row for container 1, both entities unioned.
     assert len(by_container[1]) == 1
-    assert by_container[1][0].entity_key == '{"object_tracks": {"lidar": ["47", "48"]}}'
+    assert by_container[1][0].entity_key == '{"object": {"lidar": ["47", "48"]}}'
     assert len(by_container[3]) == 1
-    assert by_container[3][0].entity_key == '{"object_tracks": {"lidar": ["12"]}}'
+    assert by_container[3][0].entity_key == '{"object": {"lidar": ["12"]}}'
 
 
 # -----------------------------------------------------------------------------
@@ -206,8 +206,8 @@ def test_two_entity_events_one_report(spark, basic_narrow_db):
         _rle_series(),
         lambda spark: spark.createDataFrame(_TWO_EVENT_ROWS, _RLE_SCHEMA),
     )
-    close = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
-    far = (db.query.series("object_tracks").distance_m > 50.0).entity_condition()
+    close = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
+    far = (db.query.series("object_tracks").distance_m > 50.0).each().ids(as_="object")
     report.add_event(EntityEvent(name="close_object", expr=close))
     report.add_event(EntityEvent(name="far_object", expr=far))
 
@@ -269,14 +269,14 @@ def test_point_in_time_series_through_report(spark, basic_narrow_db):
         _pit_series(),
         lambda spark: spark.createDataFrame(_PIT_ROWS, _PIT_SCHEMA),
     )
-    close = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     report.add_event(EntityEvent(name="close_pit", expr=close))
 
     report.determine_report()
 
     by_container = {r.container_id: r for r in _entity_rows(report)}
     assert set(by_container) == {1, 3}
-    assert by_container[1].entity_key == '{"object_tracks": {"lidar": ["47"]}}'
+    assert by_container[1].entity_key == '{"object": {"lidar": ["47"]}}'
     # The single frame's interval is closed at the container stop_ts (point-in-time
     # last-frame synthesis via the Spark tend precompute).
     assert by_container[1].start_ts == 1751528503000
@@ -323,7 +323,7 @@ def test_compound_entity_key_through_reduction(spark, basic_narrow_db):
         _compound_series(),
         lambda spark: spark.createDataFrame(_COMPOUND_ROWS, _COMPOUND_SCHEMA),
     )
-    close = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     report.add_event(EntityEvent(name="close_compound", expr=close))
 
     report.determine_report()
@@ -331,5 +331,5 @@ def test_compound_entity_key_through_reduction(spark, basic_narrow_db):
     by_container = {r.container_id: r for r in _entity_rows(report)}
     assert set(by_container) == {1, 3}
     # Compound keys render as a JSON array string inside the nested entity map.
-    assert by_container[1].entity_key == '{"object_tracks": {"lidar": ["[47, 0]"]}}'
-    assert by_container[3].entity_key == '{"object_tracks": {"lidar": ["[12, 1]"]}}'
+    assert by_container[1].entity_key == '{"object": {"lidar": ["[47, 0]"]}}'
+    assert by_container[3].entity_key == '{"object": {"lidar": ["[12, 1]"]}}'

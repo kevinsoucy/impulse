@@ -107,7 +107,7 @@ export default function QueryFlow() {
                     <div>
                         <div className="font-semibold text-sm">TSAL combines filtered intervals</div>
                         <div className="font-mono text-xs text-[var(--ifm-color-emphasis-700)]">
-                            &amp;&nbsp;&nbsp;|&nbsp;&nbsp;~&nbsp;&nbsp;·&nbsp;&nbsp;.entity_condition()
+                            &amp;&nbsp;&nbsp;|&nbsp;&nbsp;~
                         </div>
                     </div>
                 </div>

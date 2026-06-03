@@ -154,7 +154,7 @@ def test_entity_interval_closes_at_next_signal_frame_not_own_appearance():
         (1, 0, 99, 5.0),
         (1, 300, 99, 5.0),
     ]
-    leaf = (SeriesAccessor(_object_series()).distance_m < 8.0).entity_condition()
+    leaf = (SeriesAccessor(_object_series()).distance_m < 8.0).each()
     cache = MultiSeriesCache({"object_tracks": _frame(rows)}, container_stop_ts=400)
     ei = leaf.entity_intervals(_frame(rows), cache)
     assert _ivs(ei[("fusion", 47)]) == [(0, 300)]
@@ -171,7 +171,7 @@ def test_same_entity_id_under_two_signals_stays_distinct():
         ],
         columns=["container_id", "sensor_type", "ts", "object_id", "distance_m"],
     )
-    leaf = (SeriesAccessor(_object_series()).distance_m < 8.0).entity_condition()
+    leaf = (SeriesAccessor(_object_series()).distance_m < 8.0).each()
     cache = MultiSeriesCache({"object_tracks": rows}, container_stop_ts=200)
     ei = leaf.entity_intervals(rows, cache)
     assert set(ei.keys()) == {("lidar", 47), ("radar", 47)}
@@ -246,7 +246,7 @@ def test_presence_build_equals_union_of_entity_intervals_fuzz():
         presence = sel.build(cache)
 
         union = Intervals.empty()
-        for iv in sel.entity_condition().entity_intervals(df, cache).values():
+        for iv in sel.each().entity_intervals(df, cache).values():
             union = union | iv
 
         assert _norm(presence) == _norm(union)

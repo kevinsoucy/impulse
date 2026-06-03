@@ -114,7 +114,7 @@ def test_entity_and_sequence_events_share_one_fact_schema(spark, basic_narrow_db
         _object_tracks_series(),
         lambda spark: spark.createDataFrame(_OBJECT_TRACKS_ROWS, _OBJECT_TRACKS_SCHEMA),
     )
-    close_object = (db.query.series("object_tracks").distance_m < 8.0).entity_condition()
+    close_object = (db.query.series("object_tracks").distance_m < 8.0).each().ids(as_="object")
     my_report.add_event(EntityEvent(name="close_object", expr=close_object))
 
     # SequenceOfEvents over a scalar channel (entity_key must be NULL).
@@ -146,8 +146,8 @@ def test_entity_and_sequence_events_share_one_fact_schema(spark, basic_narrow_db
     # EntityEvent rows carry the populated nested JSON map.
     entity_by_container = {r.container_id: r for r in entity_df.collect()}
     assert set(entity_by_container) == {1, 3}
-    assert entity_by_container[1].entity_key == '{"object_tracks": {"lidar": ["47"]}}'
-    assert entity_by_container[3].entity_key == '{"object_tracks": {"lidar": ["12"]}}'
+    assert entity_by_container[1].entity_key == '{"object": {"lidar": ["47"]}}'
+    assert entity_by_container[3].entity_key == '{"object": {"lidar": ["12"]}}'
 
     # SequenceOfEvents rows carry NULL entity_key (no per-entity scope).
     sequence_rows = sequence_df.collect()

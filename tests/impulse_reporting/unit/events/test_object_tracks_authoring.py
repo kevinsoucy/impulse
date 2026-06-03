@@ -12,7 +12,7 @@ exercise the authoring patterns a customer would actually write:
   window) — the cogroup wiring lives elsewhere; this exercises the
   interval algebra side of composition.
 - Per-object ``EntityEvent`` materialization (which cyclist triggered
-  each window) with the nested ``{table: {signal: [ids]}}`` entity_key map.
+  each window) with the alias-keyed ``{alias: {signal: [ids]}}`` entity_key map.
 - Multi-container isolation — drive 99 has no close cyclists and emits
   no near-miss rows even when drive 42 does.
 """
@@ -174,7 +174,7 @@ def ot() -> SeriesAccessor:
 def test_same_series_and_fuses_into_single_partial(ot: SeriesAccessor):
     cyclist_close = (ot.detection_class == 1) & (ot.distance_m < 8.0)
     assert isinstance(cyclist_close, _PartialPredicate)
-    finalized = cyclist_close.entity_condition()
+    finalized = cyclist_close.each()
     assert isinstance(finalized, SeriesSelector)
     assert len(finalized.get_selectors()) == 1
     assert "detection_class" in cyclist_close.description
@@ -227,7 +227,7 @@ def test_close_cyclist_intersected_with_ego_fast_window(drive_42_cache, ot):
 
 
 def _near_miss_per_object(ot):
-    return ((ot.detection_class == 1) & (ot.distance_m < 8.0)).entity_condition()
+    return ((ot.detection_class == 1) & (ot.distance_m < 8.0)).each().ids(as_="cyclist")
 
 
 def test_eval_tree_op_dispatch_matches_build(drive_42_cache, ot):
@@ -235,8 +235,8 @@ def test_eval_tree_op_dispatch_matches_build(drive_42_cache, ot):
     # (both route through the shared apply_op). With no pins, walking a composed
     # op tree must equal building it — this is the guard against the two
     # evaluators drifting on optype handling.
-    a = (ot.detection_class == 1).entity_condition()
-    b = (ot.distance_m < 8.0).entity_condition()
+    a = (ot.detection_class == 1).each()
+    b = (ot.distance_m < 8.0).each()
     expr = a & b
     assert isinstance(expr, TimeSeriesOp)
 
@@ -251,7 +251,7 @@ def test_eval_tree_routes_udf_through_apply_op(drive_42_cache, ot):
     # A TimeSeriesUDF overrides apply_op; the per-entity evaluator must invoke it
     # exactly as build() does (this is the latent drift the unification fixes —
     # previously _eval_tree never reached TimeSeriesUDF's overridden dispatch).
-    leaf = (ot.distance_m < 8.0).entity_condition()
+    leaf = (ot.distance_m < 8.0).each()
     udf = leaf.apply(lambda intervals: intervals)
 
     built = udf.build(drive_42_cache)
@@ -272,8 +272,8 @@ def test_entity_event_emits_one_row_per_cyclist(ot):
     parsed = sorted((r[0], r[1], r[2], json.loads(r[3])) for r in rows)
     # Cyclist 47 close at [4s, 8s); cyclist 91 close at [5s, 7s).
     assert parsed == [
-        (42, 4_000_000.0, 8_000_000.0, {"object_tracks": {"fusion": ["47"]}}),
-        (42, 5_000_000.0, 7_000_000.0, {"object_tracks": {"fusion": ["91"]}}),
+        (42, 4_000_000.0, 8_000_000.0, {"cyclist": {"fusion": ["47"]}}),
+        (42, 5_000_000.0, 7_000_000.0, {"cyclist": {"fusion": ["91"]}}),
     ]
 
 
@@ -334,7 +334,7 @@ def test_three_clause_fusion_on_same_series_keeps_one_partial(ot):
         (ot.detection_class == 1) & (ot.distance_m < 8.0) & (ot.relative_velocity_ms < -1.0)
     )
     assert isinstance(sharply_approaching_cyclist, _PartialPredicate)
-    assert len(sharply_approaching_cyclist.entity_condition().get_selectors()) == 1
+    assert len(sharply_approaching_cyclist.each().get_selectors()) == 1
 
 
 def test_sharply_approaching_cyclist_window_excludes_drifting_rows(drive_42_cache, ot):
@@ -346,21 +346,21 @@ def test_sharply_approaching_cyclist_window_excludes_drifting_rows(drive_42_cach
 
 
 # ---------------------------------------------------------------------------
-# Cross-entity correlation via .entity_condition()
+# Cross-entity correlation via .each()
 # ---------------------------------------------------------------------------
 
 
 def _cyclist_close(ot):
-    return ((ot.detection_class == 1) & (ot.distance_m < 8.0)).entity_condition()
+    return ((ot.detection_class == 1) & (ot.distance_m < 8.0)).any()
 
 
 def _car_decel_close(ot):
     return (
         (ot.detection_class == 2) & (ot.distance_m < 15.0) & (ot.relative_velocity_ms < -0.5)
-    ).entity_condition()
+    ).any()
 
 
-def test_cross_entity_correlation_needs_entity_condition_on_each_side(drive_42_cache, ot):
+def test_cross_entity_correlation_needs_a_finalizing_verb_on_each_side(drive_42_cache, ot):
     cyclist_close = _cyclist_close(ot)
     car_decel_close = _car_decel_close(ot)
 
@@ -375,17 +375,17 @@ def test_cross_entity_correlation_needs_entity_condition_on_each_side(drive_42_c
     nptest.assert_array_equal(intervals.tends, [7_000_000])
 
 
-def test_without_entity_condition_cross_entity_predicates_still_fuse_per_row(drive_42_cache, ot):
+def test_same_series_predicates_fuse_per_row_so_cross_class_matches_nothing(drive_42_cache, ot):
     fused = ((ot.detection_class == 1) & (ot.distance_m < 8.0)) & (
         (ot.detection_class == 2) & (ot.distance_m < 15.0) & (ot.relative_velocity_ms < -0.5)
     )
     assert len(fused.build(drive_42_cache)) == 0
 
 
-def test_basic_event_auto_finalizes_partial_as_presence(drive_42_cache, ot):
+def test_basic_event_any_finalizes_as_presence(drive_42_cache, ot):
     event = BasicEvent(
         name="cyclist_near_miss",
-        expr=(ot.detection_class == 1) & (ot.distance_m < 8.0),
+        expr=((ot.detection_class == 1) & (ot.distance_m < 8.0)).any(),
     )
     assert isinstance(event.expression, SeriesSelector)
     intervals = event.expression.build(drive_42_cache)
@@ -409,16 +409,16 @@ def test_cross_entity_correlation_yields_nothing_on_drive_without_car(drive_99_c
 
 
 def test_cross_entity_entity_event_maps_both_objects(ot):
-    """EntityEvent over the cross-entity correlation: the matched window names
-    both the cyclist and the decelerating car in the nested entity_key map."""
+    """EntityEvent over the cross-entity correlation: the single merged window
+    names both the cyclist roster and the decelerating-car roster, keyed by
+    their aliases."""
     event = EntityEvent(
         name="cyclist_with_decelerating_car",
-        expr=_cyclist_close(ot) & _car_decel_close(ot),
+        expr=_cyclist_close(ot).ids(as_="cyclist") & _car_decel_close(ot).ids(as_="car"),
     )
     rows = event.materialize_per_container(42, _mk_cache({"object_tracks": _track_df(DRIVE_42_ROWS)}, DRIVE_42_STOP_TS))
-    parsed = sorted((r[1], r[2], r[3]) for r in rows)
-    # Cyclist 47 ([4,8)) ∩ car 217 ([5,7)) = [5,7); cyclist 91 ([5,7)) ∩ 217 = [5,7).
-    assert [(s, e, json.loads(m)) for (s, e, m) in parsed] == [
-        (5_000_000.0, 7_000_000.0, {"object_tracks": {"fusion": ["47", "217"]}}),
-        (5_000_000.0, 7_000_000.0, {"object_tracks": {"fusion": ["91", "217"]}}),
+    # cyclist presence (47:[4,8) ∪ 91:[5,7)) ∩ car presence (217:[5,7)) = [5,7).
+    # Both cyclists overlap that window, so the roster lists both.
+    assert [(r[1], r[2], json.loads(r[3])) for r in rows] == [
+        (5_000_000.0, 7_000_000.0, {"car": {"fusion": ["217"]}, "cyclist": {"fusion": ["47", "91"]}}),
     ]

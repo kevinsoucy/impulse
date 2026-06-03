@@ -134,7 +134,7 @@ ego  = db.query.signal("Vehicle Speed Sensor")
 
 # A 30 km/h speed-limit sign, a close cyclist, and ego speed over 50 — all at once.
 speed_30      = (sign.sign_class == "speed_30")
-cyclist_close = ((ot.detection_class == "cyclist") & (ot.distance_m < 8.0)).entity_condition()
+cyclist_close = ((ot.detection_class == "cyclist") & (ot.distance_m < 8.0)).any()
 risky         = speed_30 & cyclist_close & (ego > 50)
 ```
 
@@ -144,36 +144,56 @@ recording, in a single step — you don't manage joins or partitioning.
 
 ---
 
-## Asking "which one": per-entity reporting
+## Asking "which one": entity-aware events
 
-A normal event answers "did this happen in this recording?" An **`EntityEvent`**
-answers "*which* entity triggered it?" and writes that identity into the output:
+A normal event answers "did this happen in this recording?" Entity awareness adds
+finer answers — but only when you ask for them. It comes in tiers; **use only the
+one your question needs**, and a report that never asks "which entity?" never meets
+an entity concept.
+
+**Presence — "did any match?"** Over a series with entities, finalize the predicate
+with `.any()`. One window, no entity in the output. You author every event through
+the one `BasicEvent(...)` constructor.
 
 ```python
-from impulse_reporting.events.entity_event import EntityEvent
+from impulse_reporting.events.basic_event import BasicEvent
 
-near_miss = EntityEvent(
-    name="cyclist_near_miss",
-    expr=(ot.detection_class == "cyclist") & (ot.distance_m < 8.0),
+any_close = BasicEvent(
+    name="cyclist_near",
+    expr=((ot.detection_class == "cyclist") & (ot.distance_m < 8.0)).any(),
 )
 ```
 
-If two cyclists trigger the predicate in the same window, you get two output rows
-— one per cyclist. The identity lands in an `entity_key` column as a small JSON
-map, e.g. `{"object_tracks": {"radar": ["47"]}}`. Every other event type leaves
-that column `NULL`, so your existing reports are unaffected.
+**Which ones — add `.ids()`.** Project the matched ids into an `entity_key` column,
+under an alias you name. Same `BasicEvent(...)` call.
 
-**One row instead of many.** Pass `per_entity_windowing=False` (default `True`) to
-get one combined row per matched window whose `entity_key` unions every
-participating entity, instead of a row per entity.
+```python
+close = BasicEvent(
+    name="cyclist_near",
+    expr=((ot.detection_class == "cyclist") & (ot.distance_m < 8.0)).any().ids(as_="cyclist"),
+)
+# entity_key → {"cyclist": {"fusion": ["47", "48"]}}
+```
 
-**Pull the entity's payload.** Join the fact rows back to the series table on the
-entity identity to get that object's columns within the window — the event gives
-you *which* and *when*, the join brings back the *what*.
+The identity lands as a small JSON map `{alias: {signal: [ids]}}`. Events without
+`.ids()` leave the column `NULL`, so existing reports are unaffected.
 
-For correlating *two different* entities ("a close cyclist while a car braked")
-and the full registration and operator details, see the
-[Series reference](references/series.mdx).
+**One window per entity — use `.each()` instead of `.any()`.** Two cyclists in the
+same window then produce two rows, one per cyclist, instead of one merged row.
+
+**Two different entities — correlate with `&`.** "A close cyclist while a car
+braked": finalize each side and intersect them.
+
+```python
+cyclist = ((ot.detection_class == "cyclist") & (ot.distance_m < 8.0)).any().ids(as_="cyclist")
+car = ((ot.detection_class == "car") & (ot.distance_m < 15.0)).any().ids(as_="car")
+squeeze = BasicEvent(name="cyclist_and_car", expr=cyclist & car)
+```
+
+At most one side may use `.each()` (two would enumerate the entity cross-product).
+**Pull the entity's payload** by joining the fact rows back to the series table on
+the entity id. For the full tier-by-tier walkthrough and the registration and
+operator details, see the [Series reference](references/series.mdx).
 
 ---
 

@@ -1,15 +1,16 @@
-"""Per-entity event: extends BasicEvent so the matching entity's identity
-shows up in the fact table's ``entity_key`` column as a nested JSON map
-``{table_name: {signal: [entity_key, ...]}}``."""
+"""Per-entity event: extends BasicEvent so the matching entities' identities
+show up in the fact table's ``entity_key`` column as an alias-keyed, signal-
+scoped JSON map ``{alias: {signal: [entity_key, ...]}}`` — one bucket per
+``.ids(as_=alias)`` leaf, with signal retained as part of the entity identity."""
 
 from __future__ import annotations
 
-import itertools
 import json
 from collections.abc import Mapping
 from functools import partial
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyspark.sql.functions as f
 import pyspark.sql.types as T
@@ -27,12 +28,6 @@ from impulse_reporting.util.event_instance_util import generate_event_instance_i
 from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
-def _entity_id_str(entity: Any) -> str:
-    """Cast an entity key to string. Delegates to the canonical query-engine
-    renderer so the raw-frame and Spark-reduced paths agree."""
-    return render_entity_key(entity)
-
-
 def _id_sort_key(value: str):
     """Sort numeric-looking ids numerically, everything else lexicographically."""
     body = value[1:] if value.startswith("-") else value
@@ -41,19 +36,20 @@ def _id_sort_key(value: str):
     return (1, value)
 
 
-def _serialize_entity_map(entity_map: Mapping[str, Mapping[str, list]]) -> str:
-    """Serialize ``{table: {signal: [ids]}}`` to the JSON ``entity_key`` column.
+def _serialize_roster(roster: Mapping[str, Mapping[str, list[str]]]) -> str:
+    """Serialize ``{alias: {signal: [ids]}}`` to the JSON ``entity_key`` column.
 
-    Every id is cast to string; per-signal id lists are de-duplicated and sorted;
-    table and signal keys are emitted in sorted order for determinism.
+    Alias and signal keys are emitted in sorted order for determinism; the id
+    lists are already rendered, de-duplicated, sorted, and truncated by
+    ``_roster``. Signal stays in the key because it is part of the entity
+    identity — the same id under two sensors must not conflate.
     """
-    out: dict[str, dict[str, list[str]]] = {}
-    for table in sorted(entity_map):
-        out[table] = {}
-        for signal in sorted(entity_map[table]):
-            ids = {str(v) for v in entity_map[table][signal]}
-            out[table][signal] = sorted(ids, key=_id_sort_key)
-    return json.dumps(out)
+    return json.dumps(
+        {
+            alias: {signal: roster[alias][signal] for signal in sorted(roster[alias])}
+            for alias in sorted(roster)
+        }
+    )
 
 
 def _eval_tree(
@@ -104,87 +100,69 @@ def _eval_tree(
 
 
 class EntityEvent(BasicEvent):
-    """An event whose matching windows are emitted per entity.
+    """An event whose matching windows carry the participating entities.
 
     Where ``BasicEvent`` answers "did this combination of predicates hold
-    anywhere in this session?", ``EntityEvent`` answers "which specific
-    entity / entity set triggered each matched window?". The matching entities
-    are materialized into the ``entity_key`` column on the event fact table as a
-    nested JSON map ``{table_name: {signal: [entity_key, ...]}}``.
+    anywhere in this session?", ``EntityEvent`` answers "which entities, and
+    with what windowing?". It is selected by composing ``.each()`` and/or
+    ``.ids()`` leaves; the matched ids land in the ``entity_key`` column as an
+    alias-keyed, signal-scoped JSON map ``{alias: {signal: [entity_key, ...]}}``
+    (NULL for a window whose leaves are not projected with ``.ids()``).
 
-    The expression must contain at least one entity-scoped leaf (a
-    ``.entity_condition()``); presence and scalar leaves may participate too.
+    Windowing is per-leaf, not per-event:
 
-    ``per_entity_windowing`` (default ``True``) emits one row per entity
-    participation / co-occurring entity set, each with its own interval. ``False``
-    emits one combined row per matched window with the union map of all
-    participating entities.
+    - ``.any()`` / ``.any().ids()`` — one merged window (union of the matching
+      entities).
+    - ``.each()`` — one window per entity. At most **one** ``.each()`` leaf per
+      event: two would enumerate the entity cross-product. ``.any()`` legs
+      collapse, so an ``.any() & .each()`` event emits one row per ``.each()``
+      entity, each carrying the ``.any()`` roster.
     """
-
-    def __init__(
-        self,
-        name: str,
-        expr: TimeSeriesExpression,
-        desc: str | None = None,
-        required_channels: list[str] | None = None,
-        attributes: Mapping[str, str] | None = None,
-        per_entity_windowing: bool = True,
-    ):
-        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
-
-        if isinstance(expr, _PartialPredicate):
-            # A bare partial in an EntityEvent is per-entity by intent; finalize
-            # as an entity condition (raises if the series has no entity_key).
-            expr = expr.entity_condition()
-        self._per_entity_windowing = per_entity_windowing
-        self._validate(expr)
-        super().__init__(
-            name=name,
-            expr=expr,
-            desc=desc,
-            required_channels=required_channels,
-            attributes=attributes,
-        )
 
     def get_event_type_str(self) -> str:
         return "ENTITY_EVENT"
 
-    @property
-    def per_entity_windowing(self) -> bool:
-        return self._per_entity_windowing
+    def _finalize_bare(self, expr: TimeSeriesExpression) -> TimeSeriesExpression:
+        """An EntityEvent never auto-finalizes a bare partial — the windowing
+        verb is the whole point. Tell the author which one to add."""
+        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
 
-    def _definition_str(self) -> str:
-        """Fold ``per_entity_windowing`` into the definition string.
+        if isinstance(expr, _PartialPredicate):
+            raise ValueError(
+                "EntityEvent needs an entity-scoped leaf: finalize the predicate "
+                "with .each() (per-entity) or .any().ids(as_=…) (roster) before "
+                "building the event."
+            )
+        return expr
 
-        It is result-affecting: ``True`` emits one fact row per entity with a
-        per-entity ``entity_key``; ``False`` emits one row per window with the
-        combined entity-set map. Two events with the same expression but
-        different windowing produce different facts and different
-        ``event_instance_id`` values, so flipping it must register as a
-        redefinition (different ``definition_hash``) rather than an unchanged
-        upsert that strands the prior rows.
-        """
-        return f"{super()._definition_str()}|per_entity_windowing={self._per_entity_windowing}"
-
-    @staticmethod
-    def _series_leaves(expr: TimeSeriesExpression) -> list[SeriesSelector]:
-        return [s for s in expr.get_selectors() if isinstance(s, SeriesSelector)]
-
-    @staticmethod
-    def _entity_leaves(expr: TimeSeriesExpression) -> list[SeriesSelector]:
-        return [s for s in EntityEvent._series_leaves(expr) if s.entity_scoped]
-
-    def _validate(self, expr: TimeSeriesExpression) -> None:
+    def _validate_expression(self, expr: TimeSeriesExpression) -> None:
         self._assert_no_unfinalized_partials(expr)
         series_leaves = self._series_leaves(expr)
         if not series_leaves:
             raise ValueError(
                 "EntityEvent requires at least one SeriesSelector leaf in its expression"
             )
-        if not self._entity_leaves(expr):
+        entity_leaves = self._entity_leaves(expr)
+        if not entity_leaves:
             raise ValueError(
-                "EntityEvent requires at least one entity-scoped leaf "
-                "(use .entity_condition()); for a presence-only condition use BasicEvent."
+                "EntityEvent requires at least one entity-scoped leaf (.each() or "
+                ".ids()); for a presence-only condition use BasicEvent."
+            )
+        split_leaves = [leaf for leaf in entity_leaves if leaf.per_entity_windowing]
+        if len(split_leaves) > 1:
+            names = [leaf.id_alias or leaf.series.name for leaf in split_leaves]
+            raise ValueError(
+                f"At most one .each() leaf per event (got {len(split_leaves)}: "
+                f"{names}). Multiple .each() legs would enumerate the entity "
+                "cross-product; use .any() on all but one side, or enumerate the "
+                "pairs in SQL downstream."
+            )
+        projected = [leaf.id_alias for leaf in entity_leaves if leaf.id_alias is not None]
+        dupes = sorted({a for a in projected if projected.count(a) > 1})
+        if dupes:
+            raise ValueError(
+                f"Duplicate .ids(as_=…) alias(es) {dupes} in one event; each "
+                "projected leaf needs a distinct alias (it keys entity_key)."
             )
 
     @staticmethod
@@ -205,7 +183,7 @@ class EntityEvent(BasicEvent):
         if isinstance(expr, _PartialPredicate):
             raise AssertionError(
                 "EntityEvent expression still holds an unfinalized _PartialPredicate; "
-                "it must be finalized via .entity_condition() before materialization."
+                "it must be finalized via .each()/.any()/.ids() before materialization."
             )
         if isinstance(expr, TimeSeriesOp):
             for arg in (*expr.args, *expr.kwargs.values()):
@@ -216,30 +194,25 @@ class EntityEvent(BasicEvent):
         self,
         container_id: int,
         cache: SeriesCache,
-    ) -> list[tuple[int, float, float, str]]:
-        """Evaluate the expression per entity for one container and return rows.
+    ) -> list[tuple[int, float, float, str | None]]:
+        """Evaluate the expression for one container and return its fact rows.
 
-        *cache* resolves every leaf of the expression for this container:
+        Returns ``(container_id, start_ts, end_ts, entity_key_json)`` tuples.
+        ``entity_key_json`` is the alias-keyed roster, or ``None`` when no leaf in
+        the matched window is projected with ``.ids()``. A ``.each()`` leaf emits
+        one window per entity; otherwise one merged window.
 
-        - registered-series leaves via ``cache.get(series_name)`` (raw frames) or,
-          when a Spark per-entity reduction ran ahead of the cogroup, via
-          the cache's pre-reduced interval lookups — ``SeriesSelector`` consults
-          the reduction first and falls back to raw-frame synthesis;
-        - channel / scalar-signal leaves (e.g. ``veh_speed > 50``) via the channel
-          cache wrapped inside it.
-
-        Build the cache with :class:`CombinedSeriesCache` — for raw frames pass the
-        per-series frames and ``container_stop_ts``; the cogroup builds the reduced
-        variant. ``container_stop_ts`` (read for point-in-time frame synthesis)
-        lives on the cache.
-
-        Returns ``(container_id, start_ts, end_ts, entity_key_json)`` tuples — one
-        per matched window per entity (``per_entity_windowing=True``) or one per
-        matched window with the union map (``per_entity_windowing=False``).
+        *cache* resolves every leaf for this container — registered-series leaves
+        via ``cache.get(series_name)`` (raw frames) or the pre-reduced cogroup
+        lookups, and channel / scalar-signal leaves via the wrapped channel cache.
+        ``container_stop_ts`` (point-in-time frame synthesis) lives on the cache.
         """
         expr = self.expression
-        entity_leaves = self._entity_leaves(expr)
-        presence_leaves = [leaf for leaf in self._series_leaves(expr) if not leaf.entity_scoped]
+        series_leaves = self._series_leaves(expr)
+        entity_leaves = [leaf for leaf in series_leaves if leaf.entity_scoped]
+        presence_leaves = [leaf for leaf in series_leaves if not leaf.entity_scoped]
+        split_leaves = [leaf for leaf in entity_leaves if leaf.per_entity_windowing]
+        merged_leaves = [leaf for leaf in entity_leaves if not leaf.per_entity_windowing]
 
         presence_iv = {id(leaf): leaf.build(cache) for leaf in presence_leaves}
         entity_iv = {
@@ -247,13 +220,95 @@ class EntityEvent(BasicEvent):
             for leaf in entity_leaves
         }
 
-        if self._per_entity_windowing:
-            return self._materialize_per_entity(
-                container_id, expr, entity_leaves, entity_iv, presence_iv, cache
+        # Base substitution shared by every emitted window: presence leaves as
+        # built, merged entity leaves as the union of their per-entity intervals.
+        base_sub = dict(presence_iv)
+        for leaf in merged_leaves:
+            union = Intervals.empty()
+            for iv in entity_iv[id(leaf)].values():
+                union = union | iv
+            base_sub[id(leaf)] = union
+
+        if not split_leaves:
+            return self._emit_windows(
+                container_id, expr, base_sub, None, None, merged_leaves, entity_iv, cache
             )
-        return self._materialize_combined(
-            container_id, expr, entity_leaves, entity_iv, presence_iv, cache
-        )
+
+        # Exactly one .each() leg (validation guarantees ≤ 1): iterate its
+        # entities, each producing its own window(s). Channel-leaf builds don't
+        # vary per entity, so memoize them across iterations.
+        split = split_leaves[0]
+        rows: list[tuple[int, float, float, str | None]] = []
+        build_cache: dict[int, Any] = {}
+        for split_key, iv in entity_iv[id(split)].items():
+            sub = dict(base_sub)
+            sub[id(split)] = iv
+            rows.extend(
+                self._emit_windows(
+                    container_id, expr, sub, split, split_key,
+                    merged_leaves, entity_iv, cache, build_cache,
+                )
+            )
+        return rows
+
+    def _emit_windows(
+        self,
+        container_id,
+        expr,
+        sub,
+        split_leaf,
+        split_key,
+        merged_leaves,
+        entity_iv,
+        cache,
+        build_cache=None,
+    ) -> list[tuple[int, float, float, str | None]]:
+        """Evaluate the tree under *sub* and emit one row per result window, each
+        with its roster computed against that window."""
+        result = _eval_tree(expr, sub, cache, build_cache)
+        if not isinstance(result, Intervals) or len(result) == 0:
+            return []
+        rows: list[tuple[int, float, float, str | None]] = []
+        for tstart, tend in zip(result.tstarts, result.tends, strict=False):
+            window = Intervals(np.array([tstart]), np.array([tend]))
+            roster = self._roster(window, split_leaf, split_key, merged_leaves, entity_iv)
+            payload = _serialize_roster(roster) if roster else None
+            rows.append((container_id, float(tstart), float(tend), payload))
+        return rows
+
+    @staticmethod
+    def _roster(window, split_leaf, split_key, merged_leaves, entity_iv) -> dict[str, dict[str, list[str]]]:
+        """Alias-keyed, signal-scoped entity ids for one emitted *window*:
+        ``{alias: {signal: [ids]}}``.
+
+        The ``.each()`` leg (if projected) contributes its single iteration
+        entity under its signal; each merged ``.any().ids()`` leg contributes the
+        entities whose interval overlaps the window, capped at ``id_limit`` ids
+        total for the alias (sorted deterministically, then regrouped by signal).
+        Signal stays in the key — it is part of the entity identity, so the same
+        id under two sensors stays distinct. Leaves with no ``id_alias`` (and
+        aliases that match nothing in this window) contribute nothing; a window
+        with no contribution is emitted with a NULL ``entity_key``.
+        """
+        roster: dict[str, dict[str, list[str]]] = {}
+        if split_leaf is not None and split_leaf.id_alias is not None:
+            signal, entity = split_key
+            roster[split_leaf.id_alias] = {str(signal): [render_entity_key(entity)]}
+        for leaf in merged_leaves:
+            if leaf.id_alias is None:
+                continue
+            hits = {
+                (str(signal), render_entity_key(entity))
+                for (signal, entity), iv in entity_iv[id(leaf)].items()
+                if len(iv & window) > 0
+            }
+            capped = sorted(hits, key=lambda se: (se[0], _id_sort_key(se[1])))[: leaf.id_limit]
+            by_signal: dict[str, list[str]] = {}
+            for signal, ent in capped:
+                by_signal.setdefault(signal, []).append(ent)
+            if by_signal:
+                roster[leaf.id_alias] = by_signal
+        return roster
 
     # ------------------------------------------------------------------
     # Production report pipeline integration
@@ -343,53 +398,3 @@ class EntityEvent(BasicEvent):
             ):
                 rows.append((cid, name, float(start_ts), float(end_ts), entity_key))
         return pd.DataFrame(rows, columns=columns)
-
-    def _materialize_per_entity(
-        self, container_id, expr, entity_leaves, entity_iv, presence_iv, cache
-    ) -> list[tuple[int, float, float, str]]:
-        rows: list[tuple[int, float, float, str]] = []
-        leaf_keys = [list(entity_iv[id(leaf)].keys()) for leaf in entity_leaves]
-        if any(len(keys) == 0 for keys in leaf_keys):
-            # An entity condition matched no entities — the conjunction cannot fire.
-            return rows
-        # Channel leaves don't vary per entity combination; memoize their build
-        # results once per container and reuse across every combination below.
-        build_cache: dict[int, Any] = {}
-        for combo in itertools.product(*leaf_keys):
-            sub = dict(presence_iv)
-            entity_map: dict[str, dict[str, list[str]]] = {}
-            for leaf, key in zip(entity_leaves, combo, strict=False):
-                sub[id(leaf)] = entity_iv[id(leaf)][key]
-                signal, entity = key
-                entity_map.setdefault(leaf.series.name, {}).setdefault(str(signal), []).append(
-                    _entity_id_str(entity)
-                )
-            result = _eval_tree(expr, sub, cache, build_cache)
-            if not isinstance(result, Intervals) or len(result) == 0:
-                continue
-            payload = _serialize_entity_map(entity_map)
-            for tstart, tend in zip(result.tstarts, result.tends, strict=False):
-                rows.append((container_id, float(tstart), float(tend), payload))
-        return rows
-
-    def _materialize_combined(
-        self, container_id, expr, entity_leaves, entity_iv, presence_iv, cache
-    ) -> list[tuple[int, float, float, str]]:
-        sub = dict(presence_iv)
-        entity_map: dict[str, dict[str, list[str]]] = {}
-        for leaf in entity_leaves:
-            combined = Intervals.empty()
-            for (signal, entity), iv in entity_iv[id(leaf)].items():
-                combined = combined | iv
-                entity_map.setdefault(leaf.series.name, {}).setdefault(str(signal), []).append(
-                    _entity_id_str(entity)
-                )
-            sub[id(leaf)] = combined
-        result = _eval_tree(expr, sub, cache)
-        if not isinstance(result, Intervals) or len(result) == 0:
-            return []
-        payload = _serialize_entity_map(entity_map)
-        return [
-            (container_id, float(tstart), float(tend), payload)
-            for tstart, tend in zip(result.tstarts, result.tends, strict=False)
-        ]

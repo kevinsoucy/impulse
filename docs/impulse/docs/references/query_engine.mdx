@@ -76,8 +76,9 @@ A query that spans several tables resolves as a **map-reduce over recordings**. 
 metadata filter first narrows the campaign to candidate recordings. Then, in a single
 pass per recording, each referenced table applies its own predicate locally and emits
 the intervals where it held — the *map*. TSAL combines those per-table filtered
-intervals with `&`, `|`, `~`, and `.entity_condition()` into the final matching
-intervals — the *reduce*. Referencing more tables adds breadth, not stages: the engine
+intervals with `&`, `|`, and `~` into the final matching intervals — the *reduce*
+(per-entity windowing comes from finalizing a predicate with `.each()` / `.ids()`).
+Referencing more tables adds breadth, not stages: the engine
 still resolves them in one pass per recording.
 
 <QueryFlow/>

@@ -153,7 +153,7 @@ def test_or_with_payload_drops_signal_constraint():
 def test_signal_constraint_survives_finalization():
     acc = _accessor()
     fused = (acc.sensor_type == "lidar") & (acc.distance_m < 8.0)
-    assert fused.entity_condition().signal_values == frozenset({"lidar"})
+    assert fused.each().signal_values == frozenset({"lidar"})
     assert fused._finalize_presence().signal_values == frozenset({"lidar"})
 
 

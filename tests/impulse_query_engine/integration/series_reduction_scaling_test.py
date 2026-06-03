@@ -77,7 +77,7 @@ def _reduce(spark: SparkSession, frames_per_entity: int):
     """Run the per-entity reduction over a dense fixture; return (raw, reduced) DFs."""
     rows = _dense_rows(frames_per_entity)
     raw = spark.createDataFrame(rows, _DENSE_SCHEMA)
-    leaf = (SeriesAccessor(_dense_series()).distance_m < 8.0).entity_condition()
+    leaf = (SeriesAccessor(_dense_series()).distance_m < 8.0).each()
     leaf._reduce_key = 0
     reduced = _kvs_solver(spark)._reduce_series(
         spark,

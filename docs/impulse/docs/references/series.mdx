@@ -215,7 +215,7 @@ The series maps the customer's physical column names onto the engine's logical
     its own `[tstart, tend)` interval, used directly.
 - **`entity_key`** — the column (or tuple of columns) that identifies a single
   entity (an object ID, a station, a driver, an ECU). When set, the series carries
-  per-entity multiplicity and supports `.entity_condition()`. An entity key is
+  per-entity multiplicity and supports `.each()` / `.ids()`. An entity key is
   **scoped to its signal**: object `47` from `lidar` and object `47` from `radar`
   are distinct entities. Omit it for one timeline per `(session, signal)` (e.g.
   channels, IMU).
@@ -288,83 +288,125 @@ the results in time. (`db.query.signal(name)` is name sugar for
 
 ---
 
-## Per-entity reporting
+## Entity-aware events
 
-The composition above answers "did this combination ever hold?" — a
-session-scoped answer. Many investigations need a finer-grained answer: *which*
-cyclist, *which* station, *which* ECU.
+Everything above is *presence*: "did this combination ever hold?" — a session-scoped
+yes/no. The tiers below add entity awareness one step at a time. **Read only as far
+down as your question needs.** A report that never asks "which entity?" stops at
+Tier 0 and never meets an entity concept.
 
-`EntityEvent` materializes that identity. It runs the predicate per entity and
-writes the matching entity's identity into the `entity_key` column on the event
-fact table. A bare single-series predicate is per-entity by intent, so the
-constructor auto-finalizes it (no explicit `.entity_condition()` needed):
+### Tier 0 — events without entities
+
+A predicate over a channel, or over a series with no `entity_key`, becomes a
+presence window. No entity vocabulary; the `entity_key` column is `NULL`.
 
 ```python
-from impulse_reporting.events.entity_event import EntityEvent
+from impulse_reporting.events.basic_event import BasicEvent
 
-near_miss_per_object = EntityEvent(
-    name="cyclist_near_miss_per_object",
-    expr=(ot.detection_class == 1) & (ot.distance_m < 8.0),
+speeding = BasicEvent(
+    name="speeding", expr=(db.query.signal("Vehicle Speed Sensor") > 30).any()
 )
 ```
 
-When two cyclists trigger the predicate during the same window of a recording,
-the fact table carries two rows — one per cyclist — both overlapping in time. A
-`BasicEvent` would have collapsed them to a single session-scoped row.
+*Stop here unless your series declares an `entity_key` and you need to reason about
+individual entities.*
 
-`entity_key` is a string column carrying a nested JSON map
-`{table: {signal: [ids]}}` — for example `{"object_tracks": {"radar": ["47"]}}`.
-Single ids serialize as their decimal representation (`"47"`); compound entity
-keys serialize as a JSON array (`"[10, 1]"`). Existing event types (`BasicEvent`,
-`ContainerEvent`, `SequenceOfEvents`) populate the column with `NULL`, so existing
-reports are unchanged.
+### Tier 1 — "did any entity match?" with `.any()`
 
-`per_entity_windowing` (default `True`) emits one row per participating entity /
-co-occurring entity set, each with its own interval. Set it `False` to emit one
-combined row per matched window with the union map of all participating entities.
-
----
-
-## Cross-entity correlation
-
-A different question shows up across the same domains: *did entity A do X while
-entity B did Y in the same recording?* — a close cyclist while an oncoming car
-decelerated sharply, a defect on Unit A while a process anomaly fired on Unit B,
-an emissions DTC on the engine ECU while a torque DTC fired on the transmission
-ECU.
-
-This is *not* a per-row predicate. No single row is both a cyclist and a car. The
-author wants the *time-overlap* of two independent same-entity windows.
-
-Express this by calling `.entity_condition()` on each side. That finalizes the
-partial as an **entity-scoped** leaf — "all my clauses must hold for the same
-entity; from here, treat me as a session-scope window":
+A predicate over an entity-bearing series must choose a windowing verb before it can
+back an event. `.any()` asks "does any matching entity exist?" — one merged window,
+no entity identity in the output (`entity_key` stays `NULL`).
 
 ```python
-cyclist_close = (
-    (ot.detection_class == 1) & (ot.distance_m < 8.0)
-).entity_condition()
-
-car_decel_close = (
-    (ot.detection_class == 2)
-    & (ot.distance_m < 15.0)
-    & (ot.relative_velocity_ms < -0.5)
-).entity_condition()
-
-co_occurrence = cyclist_close & car_decel_close
+any_cyclist_close = BasicEvent(
+    name="cyclist_near",
+    expr=((ot.detection_class == 1) & (ot.distance_m < 8.0)).any(),
+)
 ```
 
-Each `.entity_condition()` reduces its side to session-scope `Intervals`. The
-outer `&` is interval intersection — the time-window overlap. The result fires
-only when both conditions hold in the same recording, regardless of which entities
-triggered each side. `.entity_condition()` requires the series to declare an
-`entity_key`; without one it raises (per-entity coherence is meaningless without
-an entity identity).
+*Stop here unless you need to know which entities matched.*
 
-When you're authoring a single predicate (no cross-entity correlation), you don't
-need `.entity_condition()`. The `BasicEvent` and `EntityEvent` constructors
-finalize the predicate for you. The explicit call is only necessary when the
-*outer* `&` is across two independently-authored predicates.
+### Tier 2 — which entities, with `.ids()`
+
+Chain `.ids(as_=…)` to project the matched entity ids into `entity_key` under an
+alias you choose. Same `BasicEvent(...)` constructor — the projection is what makes the
+fact rows entity-attributed.
+
+```python
+cyclists_close = BasicEvent(
+    name="cyclist_near",
+    expr=((ot.detection_class == 1) & (ot.distance_m < 8.0)).any().ids(as_="cyclist"),
+)
+# entity_key → {"cyclist": {"fusion": ["47", "48"]}}
+```
+
+`entity_key` is a string column holding `{alias: {signal: [ids]}}`. The **alias** is
+the bucket you named; **signal** is retained because it is part of the entity
+identity — object `47` from `lidar` and object `47` from `radar` stay distinct.
+Single ids serialize as `"47"`; compound entity keys as a JSON array string
+`"[10, 1]"`. The roster is capped at `limit` ids per alias (default 5); pass
+`.ids(as_=…, limit=N)` to change it. Counts over a window are *not* reported — a
+count is time-varying, which is aggregation territory, out of scope here.
+
+*Stop here unless you need one window per entity rather than one merged window.*
+
+### Tier 3 — one window per entity, with `.each()`
+
+`.each()` emits a separate window per entity instead of merging them. Two cyclists
+close in the same recording window produce two rows, each with its own interval —
+where `.any()` would have produced one.
+
+```python
+per_cyclist = BasicEvent(
+    name="cyclist_near",
+    expr=((ot.detection_class == 1) & (ot.distance_m < 8.0)).each().ids(as_="cyclist"),
+)
+```
+
+`.each()` and `.ids()` are orthogonal: `.each()` alone gives per-entity windows with
+a `NULL` `entity_key` (distinct windows, unattributed); add `.ids()` to put the id on
+each row. Both `.each()` and `.ids()` require the series to declare an `entity_key`;
+without one they raise.
+
+*Stop here unless you need to correlate conditions across different entity types.*
+
+### Tier 4 — cross-entity correlation
+
+A different question: *did entity A do X while entity B did Y in the same
+recording?* — a close cyclist while an oncoming car decelerated sharply; a defect on
+Unit A while a process anomaly fired on Unit B. No single row is both a cyclist and a
+car, so this is not a per-row predicate — you want the time-overlap of two
+independent windows. Compose two finalized leaves with `&`:
+
+```python
+cyclist_close = ((ot.detection_class == 1) & (ot.distance_m < 8.0)).any().ids(as_="cyclist")
+car_decel = (
+    (ot.detection_class == 2) & (ot.distance_m < 15.0) & (ot.relative_velocity_ms < -0.5)
+).any().ids(as_="car")
+
+squeeze = BasicEvent(name="cyclist_and_car", expr=cyclist_close & car_decel)
+# one merged window → {"car": {"fusion": ["217"]}, "cyclist": {"fusion": ["47", "91"]}}
+```
+
+Each `.any()` reduces its side to a session-scope window; the outer `&` is interval
+intersection — the time-window overlap. Both sides must declare an `entity_key`.
+
+Mixing verbs is allowed, with one rule: **at most one `.each()` per event.** `.any()`
+legs collapse and the single `.each()` leg multiplies, so `.any() & .each()` emits
+one row per `.each()` entity, each carrying the `.any()` roster:
+
+```python
+# one row per car, each naming the cyclists present in its window
+expr = cyclist_close & (
+    (ot.detection_class == 2) & (ot.distance_m < 15.0)
+).each().ids(as_="car")
+```
+
+Two `.each()` legs would enumerate the entity cross-product and are rejected at
+authoring — enumerate the pairs in SQL downstream if you genuinely need them.
+
+Events with no `.ids()` (and container / sequence events) leave `entity_key`
+`NULL`, so existing reports are unchanged.
 
 ---
 

@@ -9,20 +9,23 @@ Authoring story:
   cyclist AND this row is within 8m" — a same-entity compound, not set
   intersection of independently-built Intervals. A far cyclist coexisting with a
   close pedestrian at the same timestamp does NOT match.
-- ``.entity_condition()`` finalizes the partial as an **entity-scoped**
-  ``SeriesSelector``: per-entity coherence, evaluated per ``(signal, entity)``.
-  Composing two ``.entity_condition()`` results expresses cross-entity
-  co-occurrence::
+- A partial must be finalized by a windowing verb before it can compose across
+  series or back an event. Two orthogonal axes:
+    - ``.any()`` — presence / merged window: "does any matching row exist?".
+      No per-entity scope. Works on any series.
+    - ``.each()`` — per-entity: one window per matching ``(signal, entity)``.
+      Requires an ``entity_key``.
+  Either can be followed by ``.ids(as_=…)`` to also project the matched entity
+  ids into the event ``entity_key`` (a roster for ``.any()``, the single id for
+  ``.each()``). Composing two finalized leaves correlates them at the interval
+  level — cross-entity co-occurrence::
 
-      cyclist_close = ((ot.detection_class == "cyclist") & (ot.distance_m < 8)).entity_condition()
-      car_close     = ((ot.detection_class == "car") & (ot.distance_m < 8)).entity_condition()
+      cyclist_close = ((ot.detection_class == "cyclist") & (ot.distance_m < 8)).any()
+      car_close     = ((ot.detection_class == "car") & (ot.distance_m < 8)).any()
       squeeze       = cyclist_close & car_close
 
   Each side reduces to container-scope ``Intervals``; the ``&`` intersects them
   in time without requiring any single row to satisfy both.
-- A partial finalized **without** ``.entity_condition()`` (the default when a
-  ``BasicEvent`` auto-finalizes, or when a partial is built directly) is a
-  presence check: "does this condition hold anywhere?" — no per-entity scope.
 """
 
 from __future__ import annotations
@@ -142,26 +145,40 @@ class _PartialPredicate(TimeSeriesExpression):
     # Finalization — the per-row → container-scope boundary.
     # ------------------------------------------------------------------
 
-    def entity_condition(self) -> "SeriesSelector":
-        """Finalize as an entity-scoped leaf enforcing per-entity coherence.
+    def any(self) -> "SeriesSelector":
+        """Finalize as a presence leaf — "does any matching row exist?".
 
-        All clauses within the expression must hold for the **same entity** at
-        the same timestamp; evaluation partitions rows by ``(signal, entity)``.
-        Composing two entity conditions expresses cross-entity co-occurrence.
+        One merged window over the whole population; no entity identity is
+        projected (``entity_key`` stays NULL for this leaf). Works on any series.
+        Chain ``.ids(as_=…)`` to also emit the matched entity ids as a roster
+        (that requires an ``entity_key``).
+        """
+        # Reuse the memoized presence selector so leaf collection and build share
+        # one instance (keeps the solver-stamped ``_reduce_key`` visible — see
+        # ``_finalize_presence``).
+        return self._finalize_presence()
+
+    def each(self) -> "SeriesSelector":
+        """Finalize as a per-entity leaf — one window per matching entity.
+
+        Partitions evaluation by ``(signal, entity)`` so each entity yields its
+        own window. Composing two finalized leaves correlates them in time
+        without requiring any single row to satisfy both. Chain ``.ids(as_=…)``
+        to emit the entity id on each row.
 
         Raises
         ------
         ValueError
-            If the series has no ``entity_key`` — per-entity coherence is
-            meaningless without an entity identity.
+            If the series has no ``entity_key`` — per-entity windowing needs an
+            entity identity. Use ``.any()`` for a presence check.
         """
         if self._series.entity_key is None:
             raise ValueError(
                 f"Series {self._series.name!r} has no entity_key; "
-                ".entity_condition() requires a per-entity identity. Use a plain "
-                "predicate (no .entity_condition()) for a presence check."
+                ".each() requires a per-entity identity. Use .any() for a "
+                "presence check."
             )
-        return self._to_selector(entity_scoped=True)
+        return self._to_selector(entity_scoped=True, per_entity_windowing=True)
 
     def _finalize_presence(self) -> "SeriesSelector":
         """Finalize as a presence leaf (no per-entity scope).
@@ -179,7 +196,9 @@ class _PartialPredicate(TimeSeriesExpression):
             self._presence_selector = self._to_selector(entity_scoped=False)
         return self._presence_selector
 
-    def _to_selector(self, *, entity_scoped: bool) -> "SeriesSelector":
+    def _to_selector(
+        self, *, entity_scoped: bool, per_entity_windowing: bool = False
+    ) -> "SeriesSelector":
         from impulse_query_engine.surfaces.series_selector import SeriesSelector
 
         return SeriesSelector(
@@ -187,6 +206,7 @@ class _PartialPredicate(TimeSeriesExpression):
             predicate=self._predicate,
             description=self._description,
             entity_scoped=entity_scoped,
+            per_entity_windowing=per_entity_windowing,
             signal_values=self._signal_values,
         )
 

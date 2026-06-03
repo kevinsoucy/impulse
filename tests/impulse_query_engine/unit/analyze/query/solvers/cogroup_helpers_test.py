@@ -50,7 +50,7 @@ def _series() -> Series:
 
 
 def _leaf(reduce_key=0):
-    leaf = (SeriesAccessor(_series()).distance_m < 8.0).entity_condition()
+    leaf = (SeriesAccessor(_series()).distance_m < 8.0).each()
     leaf._reduce_key = reduce_key
     return leaf
 
@@ -104,7 +104,7 @@ def test_reduce_non_matching_group_emits_marker_row():
 
 def test_reduce_two_leaves_each_get_their_own_row():
     near = _leaf(reduce_key=0)
-    far = (SeriesAccessor(_series()).distance_m > 50.0).entity_condition()
+    far = (SeriesAccessor(_series()).distance_m > 50.0).each()
     far._reduce_key = 1
     out = _reduce(_group([(47, 5.0, 0, 10)]), [near, far])
     # Only `near` matches the close object → one row, keyed to near.

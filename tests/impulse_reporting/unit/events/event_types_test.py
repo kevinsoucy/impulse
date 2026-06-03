@@ -184,8 +184,8 @@ def test_entity_event_dispatches_to_most_specific_type_not_its_base():
         entity_key="entity_id",
     )
     ot = SeriesAccessor(series)
-    entity_event = EntityEvent(name="close", expr=(ot.distance_m < 8.0).entity_condition())
-    basic_event = BasicEvent(name="present", expr=(ot.distance_m < 8.0))
+    entity_event = EntityEvent(name="close", expr=(ot.distance_m < 8.0).each())
+    basic_event = BasicEvent(name="present", expr=(ot.distance_m < 8.0).any())
 
     grouped = _group_events([entity_event, basic_event])
 

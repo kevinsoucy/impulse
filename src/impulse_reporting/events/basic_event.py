@@ -20,7 +20,33 @@ from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
 class BasicEvent(Event):
-    """Class representing a basic event in a report."""
+    """Class representing a basic event in a report.
+
+    ``BasicEvent`` is the single public event constructor. When its expression
+    carries an entity-scoped leaf (``.each()`` / ``.ids()``), construction routes
+    to the per-entity :class:`EntityEvent` implementation so the matched ids land
+    in ``entity_key``; otherwise it stays a session-scoped presence event. A plain
+    ``.any()`` (no ``.ids()``) over an entity-bearing series is still presence, so
+    it remains a ``BasicEvent`` with a NULL ``entity_key``.
+    """
+
+    def __new__(cls, *args, **kwargs):
+        # Route only when called as BasicEvent(...) with an expression that carries
+        # an entity-scoped leaf; the returned instance is a BasicEvent subclass, so
+        # Python runs __init__ once with the original args, dispatching the routed
+        # class's _finalize_bare / _validate_expression hooks (no double init). A
+        # direct EntityEvent(...) (or any other subclass) keeps its own class.
+        #
+        # __new__ must also be callable with no args: pickle reconstructs an
+        # instance via cls.__new__(cls) (no __init__, __dict__ restored directly),
+        # which is how an EntityEvent crosses the Spark UDF boundary. Pull expr
+        # positionally or by keyword and only route when it is actually present.
+        expr = kwargs.get("expr", args[1] if len(args) >= 2 else None)
+        if cls is BasicEvent and expr is not None and cls._entity_leaves(expr):
+            from impulse_reporting.events.entity_event import EntityEvent
+
+            cls = EntityEvent
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -47,14 +73,8 @@ class BasicEvent(Event):
             Key-value metadata for the event (e.g. limit_type, limit_direction).
         """
         Event.__init__(self, name)
-        # Auto-finalize a _PartialPredicate as a presence leaf so single-predicate
-        # events don't need explicit finalization. A BasicEvent is session-scoped
-        # (presence), so it never carries per-entity scope; an EntityEvent
-        # overrides this to finalize via .entity_condition().
-        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
-
-        if isinstance(expr, _PartialPredicate):
-            expr = expr._finalize_presence()
+        expr = self._finalize_bare(expr)
+        self._validate_expression(expr)
         self.expression = expr.alias(name)
         self.description = desc
         self.required_channels = required_channels
@@ -62,6 +82,44 @@ class BasicEvent(Event):
         if attributes is not None:
             normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
         self.attributes = normalized_attributes
+
+    @staticmethod
+    def _series_leaves(expr: TimeSeriesExpression) -> list:
+        from impulse_query_engine.surfaces.series_selector import SeriesSelector
+
+        return [s for s in expr.get_selectors() if isinstance(s, SeriesSelector)]
+
+    @staticmethod
+    def _entity_leaves(expr: TimeSeriesExpression) -> list:
+        return [s for s in BasicEvent._series_leaves(expr) if s.entity_scoped]
+
+    def _finalize_bare(self, expr: TimeSeriesExpression) -> TimeSeriesExpression:
+        """Finalize a bare ``_PartialPredicate`` as a presence leaf.
+
+        A predicate over an entity-bearing series must pick a windowing verb
+        first (``.any()`` / ``.each()``); only a non-entity predicate has a
+        single sensible meaning (presence) and may be auto-finalized.
+        """
+        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
+
+        if isinstance(expr, _PartialPredicate):
+            if expr._series.entity_key is not None:
+                raise ValueError(
+                    f"Predicate over entity series {expr._series.name!r} needs a "
+                    "windowing verb: .any() for a presence window, or .each() for "
+                    "per-entity (add .ids(as_=…) to project the matched ids)."
+                )
+            expr = expr._finalize_presence()
+        return expr
+
+    def _validate_expression(self, expr: TimeSeriesExpression) -> None:
+        """A BasicEvent is session-scoped presence; it must not carry
+        entity-scoped leaves — those need EntityEvent's per-entity path."""
+        if self._entity_leaves(expr):
+            raise ValueError(
+                "Expression has entity-scoped leaves (.each() / .ids()); "
+                "use EntityEvent, not BasicEvent, for per-entity reporting."
+            )
 
     def get_id(self) -> int:
         """

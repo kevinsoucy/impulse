@@ -134,7 +134,7 @@ class TestCrossSeriesCogroup:
         _register_object_tracks(key_value_store_db)
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = key_value_store_db.query
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
 
         result = query.select(near).solve(spark=spark, solver=solver)
         by_container = {r.container_id: r["near"] for r in result.collect()}
@@ -148,7 +148,7 @@ class TestCrossSeriesCogroup:
     def test_bare_presence_partial_in_select_returns_intervals(
         self, spark: SparkSession, key_value_store_db: MeasurementDB
     ):
-        # A partial finalized as a *presence* check (no .entity_condition())
+        # A partial finalized as a *presence* check (no .each())
         # placed directly in select() must still resolve through the reduced
         # cogroup. Before the memoization fix, get_selectors()/build() finalized
         # different SeriesSelector instances, so the _reduce_key stamped on the
@@ -176,7 +176,7 @@ class TestCrossSeriesCogroup:
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = key_value_store_db.query
         eng_rpm = query.channel(channel_name="Engine RPM")
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
 
         result = query.select(eng_rpm.mean().alias("rpm_mean"), near).solve(
             spark=spark, solver=solver
@@ -200,7 +200,7 @@ class TestCrossSeriesCogroup:
         # A non-matching container filter must drop every container — including
         # the series side (filters prune series, not just channels).
         query.where(MetricSelector("brand") == "NoSuchBrand")
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
 
         result = query.select(near).solve(spark=spark, solver=solver)
         assert result.count() == 0
@@ -228,8 +228,8 @@ class TestCrossSeriesMultiSeriesCogroup:
         _register_traffic_signs(db, rows=[(1, "camera", 5, 15, 12, "speed_30")])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        obj = (query.series("object_tracks").distance_m < 8.0).entity_condition()
-        sign = (query.series("traffic_signs").sign_class == "speed_30").entity_condition()
+        obj = (query.series("object_tracks").distance_m < 8.0).each()
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each()
 
         result = query.select((obj & sign).alias("squeeze")).solve(spark=spark, solver=solver)
         by_container = {r.container_id: r["squeeze"] for r in result.collect()}
@@ -246,8 +246,8 @@ class TestCrossSeriesMultiSeriesCogroup:
         _register_traffic_signs(db, rows=[(1, "camera", 12, 15, 12, "speed_30")])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        obj = (query.series("object_tracks").distance_m < 8.0).entity_condition()
-        sign = (query.series("traffic_signs").sign_class == "speed_30").entity_condition()
+        obj = (query.series("object_tracks").distance_m < 8.0).each()
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each()
 
         result = query.select((obj | sign).alias("either")).solve(spark=spark, solver=solver)
         intervals = {r.container_id: r["either"] for r in result.collect()}[1]
@@ -265,8 +265,8 @@ class TestCrossSeriesMultiSeriesCogroup:
         _register_traffic_signs(db, rows=[(1, "camera", 0, 10, 12, "speed_30")])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        obj = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("obj")
-        sign = (query.series("traffic_signs").sign_class == "speed_30").entity_condition().alias(
+        obj = (query.series("object_tracks").distance_m < 8.0).each().alias("obj")
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each().alias(
             "sign"
         )
         result = query.select(obj, sign).solve(spark=spark, solver=solver)
@@ -284,8 +284,8 @@ class TestCrossSeriesMultiSeriesCogroup:
         _register_traffic_signs(db, rows=[(1, "camera", 0, 10, 12, "speed_30")])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        obj = (query.series("object_tracks").distance_m < 8.0).entity_condition()
-        sign = (query.series("traffic_signs").sign_class == "speed_30").entity_condition()
+        obj = (query.series("object_tracks").distance_m < 8.0).each()
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each()
         result = query.select((obj & sign).alias("both")).solve(spark=spark, solver=solver)
         by_container = {r.container_id: r["both"] for r in result.collect()}
         # No container has both → all empty (containers 1 and 2 each have only one).
@@ -300,8 +300,8 @@ class TestCrossSeriesMultiSeriesCogroup:
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
         rpm = query.channel(channel_name="Engine RPM").mean().alias("rpm_mean")
-        obj = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("obj")
-        sign = (query.series("traffic_signs").sign_class == "speed_30").entity_condition().alias(
+        obj = (query.series("object_tracks").distance_m < 8.0).each().alias("obj")
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each().alias(
             "sign"
         )
         result = query.select(rpm, obj, sign).solve(spark=spark, solver=solver)
@@ -321,8 +321,8 @@ class TestCrossSeriesEdgeCases:
         _register_object_tracks(db, rows=[(1, "lidar", 0, 10, 47, 5.0)])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
-        far = (query.series("object_tracks").distance_m > 8.0).entity_condition().alias("far")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
+        far = (query.series("object_tracks").distance_m > 8.0).each().alias("far")
         result = query.select(near, far).solve(spark=spark, solver=solver)
         row = {r.container_id: r for r in result.collect()}[1]
         assert row["near"] == [[0.0, 10.0]]
@@ -338,7 +338,7 @@ class TestCrossSeriesEdgeCases:
         )
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
         result = query.select(near).solve(spark=spark, solver=solver)
         assert {r.container_id: r["near"] for r in result.collect()}[1] == [
             [0.0, 5.0],
@@ -376,7 +376,7 @@ class TestCrossSeriesEdgeCases:
         )
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        near = (query.series("renamed_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("renamed_tracks").distance_m < 8.0).each().alias("near")
         result = query.select(near).solve(spark=spark, solver=solver)
         assert {r.container_id: r["near"] for r in result.collect()}[1] == [[0.0, 10.0]]
 
@@ -388,7 +388,7 @@ class TestCrossSeriesEdgeCases:
         _register_object_tracks(db, rows=[(1, "lidar", 0, 10, 47, 5.0)])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
         result = query.select(near).solve(spark=spark, solver=solver)
         val = {r.container_id: r["near"] for r in result.collect()}[1]
         assert isinstance(val, list) and isinstance(val[0], list) and len(val[0]) == 2
@@ -424,7 +424,7 @@ class TestCrossSeriesEdgeCases:
         _register_pit_tracks(db, rows=[(1, "lidar", f0, 47, 5.0), (1, "lidar", f1, 47, 4.0)])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
-        near = (query.series("pit_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("pit_tracks").distance_m < 8.0).each().alias("near")
 
         result = query.select(near).solve(spark=spark, solver=solver)
         by_container = {r.container_id: r["near"] for r in result.collect()}
@@ -435,7 +435,7 @@ class TestCrossSeriesEdgeCases:
     def test_bare_presence_partial_point_in_time_closes_at_stop_ts(
         self, spark: SparkSession, key_value_store_db: MeasurementDB
     ):
-        # #3/#4: a bare presence partial (no .entity_condition()) on a
+        # #3/#4: a bare presence partial (no .each()) on a
         # point-in-time series must resolve through the reduced cogroup AND close
         # the last frame at container_stop_ts — exercising the memoization fix on
         # the point-in-time interval-synthesis path (not just RLE).
@@ -532,7 +532,7 @@ class TestCrossSeriesEdgeCases:
         _register_object_tracks(key_value_store_db)
         query = key_value_store_db.query
         rpm = query.channel(channel_name="Engine RPM").mean().alias("rpm")
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
 
         with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
             query.select(rpm, near).solve(spark=spark, solver=BlobSolver())
@@ -547,7 +547,7 @@ class TestCrossSeriesEdgeCases:
 
         _register_object_tracks(key_value_store_db)
         query = key_value_store_db.query
-        near = (query.series("object_tracks").distance_m < 8.0).entity_condition().alias("near")
+        near = (query.series("object_tracks").distance_m < 8.0).each().alias("near")
 
         with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
             query.select(near).solve(spark=spark, solver=BlobSolver())
