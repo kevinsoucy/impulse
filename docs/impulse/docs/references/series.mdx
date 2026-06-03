@@ -7,7 +7,7 @@ import ShapeTable from '@site/src/components/ShapeTable';
 
 # Series
 
-Impulse 1.0 modelled measurement recordings as **scalar time-series channels** —
+Impulse 0.x modelled measurement recordings as **scalar time-series channels** —
 one numeric value per `(channel, interval)`, RLE-encoded, with the query language
 evaluating predicates against `SampleSeries`. That model handles CAN signals, ECU
 parameters, and analog sensor traces cleanly.
@@ -28,20 +28,20 @@ series with a single `value` payload column and no entity key.
 
 ## One shape vs. many
 
-Impulse 1.0 held exactly one shape — a scalar channel, one value per
+Impulse 0.x held exactly one shape — a scalar channel, one value per
 `(signal, instant)`. Real campaigns carry more: an IMU writes several typed values
 (some of them strings) at one instant; a lidar or camera frame holds *many* detected
 objects at the same instant, each its own row keyed by an entity; sign reads and
 geolocation fixes are sampled events. A series registers any of these as-is — your
 schema, any number of tables, no limit.
 
-**Impulse 1.0 — one shape**
+**Impulse 0.x — one shape**
 
 <div className="max-w-lg my-4">
   <ShapeTable
-    badge="1.0"
+    badge="0.x"
     title="Scalar channel (RLE)"
-    caption="One value per (channel, interval). The only shape 1.0 can hold."
+    caption="One value per (channel, interval). The only shape 0.x can hold."
     columns={[
       {label: 'container_id', role: true},
       {label: 'channel_id', role: true},
@@ -57,11 +57,11 @@ schema, any number of tables, no limit.
   />
 </div>
 
-**Impulse 2.0 — your tables, any shape**
+**Impulse 1.0 — your tables, any shape**
 
 <div className="grid gap-4 lg:grid-cols-2 my-4">
   <ShapeTable
-    badge="2.0"
+    badge="1.0"
     title="Wide / multi-value per instant"
     caption="One row per timestamp, many typed columns — incl. strings. No entity key (IMU, ECU frame)."
     columns={[
@@ -80,7 +80,7 @@ schema, any number of tables, no limit.
   />
 
   <ShapeTable
-    badge="2.0"
+    badge="1.0"
     title="Entity-keyed (lidar / radar / camera)"
     caption="Many detections share one frame — each carries an object_id."
     columns={[
@@ -100,12 +100,12 @@ schema, any number of tables, no limit.
     highlight={{
       rows: [0, 1, 2],
       col: 2,
-      note: 'Three objects share one frame_ts — three rows for a single instant. A 1.0 scalar channel holds exactly one value per (signal, time), so this shape is unrepresentable in 1.0.',
+      note: 'Three objects share one frame_ts — three rows for a single instant. A 0.x scalar channel holds exactly one value per (signal, time), so this shape is unrepresentable in 0.x.',
     }}
   />
 
   <ShapeTable
-    badge="2.0"
+    badge="1.0"
     title="Point-in-time detections"
     caption="Sampled events — sign reads, geolocation fixes. String + numeric payload."
     columns={[
@@ -145,7 +145,7 @@ What to use is two questions, often conflated:
 
 | Your data shape | What to use |
 |-----------------|-------------|
-| A single **numeric** value per `(signal, instant)` | Scalar channel (one per signal) — the 1.0 case |
+| A single **numeric** value per `(signal, instant)` | Scalar channel (one per signal) — the 0.x case |
 | Several values per instant, or any string value, one row per instant (IMU, ECU frame) | A series with **no** `entity_key` |
 | Several rows per `(session, signal, timestamp)`, each a distinct entity (lidar objects, defects) | A series with an `entity_key` |
 | Pre-aggregated intervals (one row per `[tstart, tend)`) | A run-length-encoded series (`tstart_col`/`tend_col`) |
@@ -205,7 +205,7 @@ The series maps the customer's physical column names onto the engine's logical
 - **`signal_col`** — the column mapped to the signal-identity role. Defaults to
   `"signal_id"`; the example overrides it to `"sensor"` (values like `"lidar"`,
   `"radar"`, `"camera_front"`). Signal is a primary filtering dimension — the
-  equivalent of a channel in Impulse 1.0 — so every series must carry one.
+  equivalent of a channel in Impulse 0.x — so every series must carry one.
 - **One time-axis shape**, exactly one of:
   - **`timestamp_col`** (point-in-time) — each row is a sample at an instant;
     Impulse synthesizes `[frame_ts_i, frame_ts_{i+1})` intervals from the

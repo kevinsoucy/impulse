@@ -1,11 +1,11 @@
 ---
 sidebar_position: 4
-title: User Guide (2.0)
+title: User Guide (1.0)
 ---
 
-# Impulse 2.0 User Guide
+# Impulse 1.0 User Guide
 
-This guide is the map. It explains how Impulse 2.0 thinks about your data — the
+This guide is the map. It explains how Impulse 1.0 thinks about your data — the
 difference between channels and series, how the metadata tables fit together,
 how to query across several tables at once, and what's required versus nice to
 have. For the deep dive on series specifically, see the
@@ -29,7 +29,7 @@ Channels and series are just two kinds of data you write predicates against.
 ## Channels vs. series
 
 A **channel** is one number that changes over time — engine RPM, vehicle speed,
-a temperature. One value per moment. This is what Impulse 1.0 handled, and it
+a temperature. One value per moment. This is what Impulse 0.x handled, and it
 still works the same.
 
 A **series** is your own table where each row is a thing observed at a time, and
@@ -53,7 +53,7 @@ something did. An entity key is scoped to its signal: object `47` seen by the
 lidar and object `47` seen by the radar are two different things.
 
 A channel is simply the smallest possible series — one value column, no
-entities. Nothing in 2.0 is bolted on; series are the general case and channels
+entities. Nothing in 1.0 is bolted on; series are the general case and channels
 are the simple one.
 
 Reach for channels when you have **many sensors each sampling on its own
@@ -65,7 +65,7 @@ query do (see [Best practices](#best-practices)).
 
 ## The data model: what's required, what's optional
 
-Impulse reads a few tables. In 2.0, fewer of them are mandatory than you might
+Impulse reads a few tables. In 1.0, fewer of them are mandatory than you might
 expect.
 
 | Table | What it holds | Required? |
@@ -83,7 +83,7 @@ channels, no channel-metadata tables.
 
 ## Three ways to name a signal
 
-All three coexist in 2.0. None is deprecated — they're just different ways to
+All three coexist in 1.0. None is deprecated — they're just different ways to
 point at data.
 
 ```python
@@ -94,7 +94,7 @@ close = ot.distance_m < 8.0
 # 2. A scalar signal, by name
 speed = db.query.signal("Vehicle Speed Sensor")
 
-# 3. A channel, by its tags (the 1.0 tag-addressed path) — unchanged
+# 3. A channel, by its tags (the 0.x tag-addressed path) — unchanged
 speed = db.query.channel(channel_name="Vehicle Speed Sensor")
 ```
 
@@ -107,7 +107,7 @@ registered as a series; the engine knows about them natively.
 
 A series' **signal column** (e.g. `object_tracks.sensor_type` ∈ `lidar` /
 `radar` / `fusion`) is queryable like any other column — and it's a primary
-filter, just as it was in 1.0:
+filter, just as it was in 0.x:
 
 ```python
 ot = db.query.series("object_tracks")
@@ -203,7 +203,7 @@ operator details, see the [Series reference](references/series.mdx).
 plain integers — no unit conversion, no resampling — so every series and the
 recording metadata must share the **same unit and epoch**. A mismatch isn't caught
 at runtime; it quietly gives wrong answers. Align once, upstream at ingest — the
-single most important rule in 2.0.
+single most important rule in 1.0.
 
 **Keep dense series small at ingest.** A camera running at 10 Hz for 30 minutes
 with 200 objects per frame is millions of rows per recording. Three upstream
@@ -243,5 +243,5 @@ own series or channel.
   and the time-axis precondition in full.
 - **[Getting Started](getting_started.md)** — run a report end-to-end in five
   minutes.
-- **[What's New & Upgrading in 2.0](whats_new_2_0.md)** — the new capabilities
-  and the (safe) 1.0 → 2.0 upgrade.
+- **[What's New & Upgrading in 1.0](whats_new_1_0.md)** — the new capabilities
+  and the (safe) 0.x → 1.0 upgrade.
