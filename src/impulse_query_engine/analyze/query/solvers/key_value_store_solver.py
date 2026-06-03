@@ -8,80 +8,14 @@ from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
-from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
-from .series_cache import SeriesCache
+from .series_cache import ChannelTimeSeriesCache
 from .solver_config import SolverConfig
 from .utils.interval_encoder import IntervalEncoder
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
-
-
-class KVSTimeSeriesCache(SeriesCache):
-    def __init__(self, pdf, col_map: dict[str, str]):
-        """
-        Initialize the KVSTimeSeriesCache.
-
-        Parameters
-        ----------
-        pdf : pd.DataFrame
-            DataFrame containing time series data.
-        col_map : dict[str, str]
-            Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
-            ``"val"`` to the actual column names in *pdf*.
-        """
-        self._cid_col = col_map["cid"]
-        self._ch_col = col_map["ch"]
-        self._ts_col = col_map["ts"]
-        self._te_col = col_map["te"]
-        self._val_col = col_map["val"]
-
-        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
-
-    def resolve(self, selection):
-        """
-        Resolve selected tags/metrics to a list of candidates.
-
-        Parameters
-        ----------
-        selection : Any
-            The selection object specifying tags or metrics.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing the resolved candidates.
-        """
-        if "selector_ids" in self.mdf.columns:
-            idx = self.mdf["selector_ids"].apply(
-                lambda arr: arr is not None and selection.selector_id in arr
-            )
-            return self.mdf[idx]
-        idx = selection._expr.build_pandas(self.mdf)
-        return self.mdf[idx]
-
-    def load_blob(self, mid, cid):
-        """
-        Load a time series blob from the DataFrame.
-
-        Parameters
-        ----------
-        mid : Any
-            Container or measurement ID.
-        cid : Any
-            Channel ID.
-
-        Returns
-        -------
-        SampleSeries
-            The loaded sample series object.
-        """
-        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
-        return SampleSeries(s[self._ts_col], s[self._te_col], s[self._val_col])
 
 
 class KeyValueStoreSolver(QuerySolver):
@@ -133,7 +67,7 @@ class KeyValueStoreSolver(QuerySolver):
         )
 
     def _channel_cache_cls(self):
-        return KVSTimeSeriesCache
+        return ChannelTimeSeriesCache
 
     # ------------------------------------------------------------------
     # Solver stages
@@ -473,7 +407,7 @@ class KeyValueStoreSolver(QuerySolver):
             # Calculate the tend info and prepare the data for the solving step.
             q = self.interval_encoder.prepare_channels_df(q)
 
-        solve_udf, schema = self._grouped_map_udf(selections, dtypes, KVSTimeSeriesCache)
+        solve_udf, schema = self._grouped_map_udf(selections, dtypes, ChannelTimeSeriesCache)
         df = q.join(
             F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
         )

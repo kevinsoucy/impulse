@@ -178,7 +178,7 @@ class _PartialPredicate(TimeSeriesExpression):
                 ".each() requires a per-entity identity. Use .any() for a "
                 "presence check."
             )
-        return self._to_selector(entity_scoped=True, per_entity_windowing=True)
+        return self._to_selector(per_entity_windowing=True)
 
     def _finalize_presence(self) -> "SeriesSelector":
         """Finalize as a presence leaf (no per-entity scope).
@@ -193,19 +193,16 @@ class _PartialPredicate(TimeSeriesExpression):
         which holds the selector as an attribute).
         """
         if self._presence_selector is None:
-            self._presence_selector = self._to_selector(entity_scoped=False)
+            self._presence_selector = self._to_selector()
         return self._presence_selector
 
-    def _to_selector(
-        self, *, entity_scoped: bool, per_entity_windowing: bool = False
-    ) -> "SeriesSelector":
+    def _to_selector(self, *, per_entity_windowing: bool = False) -> "SeriesSelector":
         from impulse_query_engine.surfaces.series_selector import SeriesSelector
 
         return SeriesSelector(
             self._series,
             predicate=self._predicate,
             description=self._description,
-            entity_scoped=entity_scoped,
             per_entity_windowing=per_entity_windowing,
             signal_values=self._signal_values,
         )

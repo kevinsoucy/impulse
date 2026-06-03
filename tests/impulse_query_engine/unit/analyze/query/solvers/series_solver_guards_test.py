@@ -117,16 +117,16 @@ def test_stop_ts_none_metrics_returns_none(spark):
 
 
 def test_only_grouped_map_solvers_provide_a_channel_cache():
-    # Delta and KVS override _channel_cache_cls; BlobSolver does not, so the
-    # base's NotImplementedError is what a series+channel query on the default
-    # solver ultimately hits.
+    # Delta and KVS override _channel_cache_cls; BlobSolver does not. The base is
+    # an internal backstop — a series query on BlobSolver is rejected earlier, at
+    # QueryBuilder._require_series_support.
     assert DeltaSolver._channel_cache_cls is not QuerySolver._channel_cache_cls
     assert KeyValueStoreSolver._channel_cache_cls is not QuerySolver._channel_cache_cls
     assert BlobSolver._channel_cache_cls is QuerySolver._channel_cache_cls
 
 
 def test_blob_solver_channel_cache_raises_actionable_error():
-    with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
+    with pytest.raises(NotImplementedError, match="provides no channel cache"):
         BlobSolver()._channel_cache_cls()
 
 

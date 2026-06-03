@@ -212,17 +212,19 @@ class QuerySolver(ABC):
     # cogrouped rows.
 
     def _channel_cache_cls(self) -> type[SeriesCache]:
-        """The per-solver channel :class:`SeriesCache` subclass (cogroup path).
+        """The channel :class:`SeriesCache` subclass for the cogroup path.
 
-        Overridden by grouped-map solvers (Delta, KVS). The base raises so a
-        solver that has no inline channel cache (e.g. the RDD-based Blob solver)
-        fails loudly rather than silently dropping channel leaves.
+        Grouped-map solvers (Delta, KVS) override this to return the shared
+        :class:`ChannelTimeSeriesCache`. This is reached only after a solver has
+        passed :meth:`QueryBuilder._require_series_support` — the single place
+        unsupported solvers (e.g. ``BlobSolver``) are rejected — so the base is an
+        internal invariant guard: a solver that advertises
+        ``supports_registered_series`` must also supply a channel cache.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} cannot resolve channel leaves alongside "
-            "registered series in a single query. Use DeltaSolver or "
-            "KeyValueStoreSolver for queries that combine channels and registered "
-            "series, or drop the channel leaf to run a series-only query."
+            f"{type(self).__name__} provides no channel cache for the cogroup path "
+            "(_channel_cache_cls is not implemented). Unsupported solvers are "
+            "rejected earlier, at QueryBuilder._require_series_support."
         )
 
     def _read_prepared_channels(self, spark, query) -> DataFrame:
@@ -419,10 +421,9 @@ class QuerySolver(ABC):
         )
 
     @staticmethod
-    def _reduced_core(channels_pdf, reduced_pdf, *, per_container, col_map, channel_cache):
+    def _reduced_core(channels_pdf, reduced_pdf, *, per_container, cid_col, channel_cache):
         """Per-container body shared by the cogroup and series-only UDFs: pick the
         container id, build the reduced cache, hand it to *per_container*."""
-        cid_col = col_map["cid"]
         cid_val = None
         if channels_pdf is not None and len(channels_pdf):
             cid_val = channels_pdf[cid_col].iloc[0]
@@ -440,17 +441,17 @@ class QuerySolver(ABC):
             channels_pdf,
             reduced_pdf,
             per_container=per_container,
-            col_map=col_map,
+            cid_col=col_map["cid"],
             channel_cache=channel_cache,
         )
 
     @staticmethod
-    def _reduced_series_only_udf(reduced_pdf, *, per_container, col_map):
+    def _reduced_series_only_udf(reduced_pdf, *, per_container, cid_col):
         return QuerySolver._reduced_core(
             None,
             reduced_pdf,
             per_container=per_container,
-            col_map=col_map,
+            cid_col=cid_col,
             channel_cache=EmptyTimeSeriesCache(),
         )
 
@@ -550,15 +551,15 @@ class QuerySolver(ABC):
         series_only_udf = partial(
             QuerySolver._reduced_series_only_udf,
             per_container=per_container,
-            col_map=col_map,
+            cid_col=col_map["cid"],
         )
         return reduced_stream.groupBy(cid).applyInPandas(series_only_udf, schema)
 
     @staticmethod
-    def _query_result_row(cid_val, cache, *, selections, col_map):
+    def _query_result_row(cid_val, cache, *, selections, cid_col):
         """``per_container`` producer for the query path: one result row whose
         columns are the query selections (each serialized to its dtype)."""
-        result = {col_map["cid"]: [cid_val]}
+        result = {cid_col: [cid_val]}
         for s in selections:
             result[s._alias] = [QuerySolver._serialize_built(s.build(cache))]
         return pd.DataFrame(result)
@@ -605,7 +606,7 @@ class QuerySolver(ABC):
         per_container = partial(
             QuerySolver._query_result_row,
             selections=selections,
-            col_map=self.config.col_map,
+            cid_col=self.config.container_id_col,
         )
         return self.run_series_cogroup(
             spark,

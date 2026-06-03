@@ -1,10 +1,10 @@
 # pylint: disable=missing-function-docstring
 """
-Tests for KVSTimeSeriesCache, the hoisted grouped-map UDF body, and
+Tests for ChannelTimeSeriesCache, the hoisted grouped-map UDF body, and
 KeyValueStoreSolver's wide-only data model (no container_tags_table).
 
 Covers:
-- KVSTimeSeriesCache with default and custom column configs (via col_map)
+- ChannelTimeSeriesCache with default and custom column configs (via col_map)
 - The grouped-map UDF body (QuerySolver._grouped_map_solve_udf) with col_map
 - KeyValueStoreSolver.filter_channel_metrics / solve end-to-end with
   the wide-only data model via the basic_narrow_db fixture
@@ -16,8 +16,8 @@ from pyspark.sql import SparkSession
 
 from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
-    KVSTimeSeriesCache,
 )
+from impulse_query_engine.analyze.query.solvers.series_cache import ChannelTimeSeriesCache
 from impulse_query_engine.analyze.query.solvers.solver_config import (
     SolverConfig,
     TableConfig,
@@ -61,17 +61,17 @@ def _make_channel_pdf(
 
 
 # ---------------------------------------------------------------------------
-# TestKVSTimeSeriesCache
+# TestChannelTimeSeriesCache
 # ---------------------------------------------------------------------------
 
 
-class TestKVSTimeSeriesCache:
-    """Unit tests for KVSTimeSeriesCache."""
+class TestChannelTimeSeriesCache:
+    """Unit tests for ChannelTimeSeriesCache."""
 
     def test_default_config_load_blob(self):
         """load_blob works with default column names."""
         pdf = _make_channel_pdf()
-        cache = KVSTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        cache = ChannelTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
         series = cache.load_blob(1, 10)
         assert list(series.tstarts) == [0, 100]
         assert list(series.values) == [1.0, 2.0]
@@ -81,7 +81,7 @@ class TestKVSTimeSeriesCache:
         pdf = _make_channel_pdf(
             cid_col="meas_id", ch_col="sig_id", ts_col="t_start", te_col="t_stop", val_col="val"
         )
-        cache = KVSTimeSeriesCache(pdf, col_map=CUSTOM_COL_MAP)
+        cache = ChannelTimeSeriesCache(pdf, col_map=CUSTOM_COL_MAP)
         series = cache.load_blob(2, 20)
         assert list(series.tstarts) == [0, 200]
         assert list(series.values) == [3.0, 4.0]
@@ -89,7 +89,7 @@ class TestKVSTimeSeriesCache:
     def test_mdf_drops_data_columns(self):
         """mdf should not contain tstart/tend/value columns."""
         pdf = _make_channel_pdf()
-        cache = KVSTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        cache = ChannelTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
         assert "tstart" not in cache.mdf.columns
         assert "tend" not in cache.mdf.columns
         assert "value" not in cache.mdf.columns
@@ -106,7 +106,7 @@ class TestKVSTimeSeriesCache:
             "te": "t_stop",
             "val": "val",
         }
-        cache = KVSTimeSeriesCache(pdf, col_map=col_map)
+        cache = ChannelTimeSeriesCache(pdf, col_map=col_map)
         assert "t_start" not in cache.mdf.columns
         assert "t_stop" not in cache.mdf.columns
         assert "val" not in cache.mdf.columns
@@ -116,7 +116,7 @@ class TestKVSTimeSeriesCache:
         pdf = _make_channel_pdf()
         # Scramble order
         pdf = pdf.sample(frac=1, random_state=0).reset_index(drop=True)
-        cache = KVSTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
+        cache = ChannelTimeSeriesCache(pdf, col_map=DEFAULT_COL_MAP)
         # Verify that for each (container_id, channel_id) group, tstarts are sorted
         for (cid, chid), group in cache.pdf.groupby([cache._cid_col, cache._ch_col]):
             ts_vals = list(group[cache._ts_col])
@@ -151,7 +151,7 @@ class TestKeyValueStoreSolverUDF:
                 return self._v
 
         result = KeyValueStoreSolver._grouped_map_solve_udf(
-            pdf, selections=[_MockSelection()], col_map=DEFAULT_COL_MAP, cache_cls=KVSTimeSeriesCache
+            pdf, selections=[_MockSelection()], col_map=DEFAULT_COL_MAP, cache_cls=ChannelTimeSeriesCache
         )
         assert "container_id" in result.columns
         assert result["container_id"].iloc[0] == pdf["container_id"].iloc[0]
@@ -176,7 +176,7 @@ class TestKeyValueStoreSolverUDF:
                 return self._v
 
         result = KeyValueStoreSolver._grouped_map_solve_udf(
-            pdf, selections=[_MockSelection()], col_map=CUSTOM_COL_MAP, cache_cls=KVSTimeSeriesCache
+            pdf, selections=[_MockSelection()], col_map=CUSTOM_COL_MAP, cache_cls=ChannelTimeSeriesCache
         )
         assert "meas_id" in result.columns
         assert "container_id" not in result.columns

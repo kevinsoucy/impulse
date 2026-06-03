@@ -74,6 +74,83 @@ class SeriesCache(ABC):
         return None
 
 
+class ChannelTimeSeriesCache(SeriesCache):
+    """In-memory channel cache for the cogroup path, shared by all grouped-map
+    solvers.
+
+    Holds one container's channel rows as a metadata frame (``mdf``, one row per
+    ``(container, channel)``) plus the sorted sample frame (``pdf``), and resolves
+    selections / loads blobs against them. The backend (Delta vs key-value store)
+    only affects how the rows are read upstream; once they are a pandas frame the
+    caching behaviour is identical, so a single class serves every solver
+    (``DeltaSolver`` / ``KeyValueStoreSolver`` return it from
+    ``_channel_cache_cls``).
+    """
+
+    def __init__(self, pdf, col_map: dict[str, str]):
+        """
+        Initialize the ChannelTimeSeriesCache.
+
+        Parameters
+        ----------
+        pdf : pd.DataFrame
+            DataFrame containing time series data.
+        col_map : dict[str, str]
+            Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
+            ``"val"`` to the actual column names in *pdf*.
+        """
+        self._cid_col = col_map["cid"]
+        self._ch_col = col_map["ch"]
+        self._ts_col = col_map["ts"]
+        self._te_col = col_map["te"]
+        self._val_col = col_map["val"]
+
+        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
+        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
+        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
+
+    def resolve(self, selection) -> pd.DataFrame:
+        """
+        Resolve selected tags/metrics to a list of candidates.
+
+        Parameters
+        ----------
+        selection : Any
+            The selection object specifying tags or metrics.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing the resolved candidates.
+        """
+        if "selector_ids" in self.mdf.columns:
+            idx = self.mdf["selector_ids"].apply(
+                lambda arr: arr is not None and selection.selector_id in arr
+            )
+            return self.mdf[idx]
+        idx = selection._expr.build_pandas(self.mdf)
+        return self.mdf[idx]
+
+    def load_blob(self, mid, cid) -> SampleSeries:
+        """
+        Load a time series blob from the DataFrame.
+
+        Parameters
+        ----------
+        mid : Any
+            Container or measurement ID.
+        cid : Any
+            Channel ID.
+
+        Returns
+        -------
+        SampleSeries
+            The loaded sample series object.
+        """
+        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
+        return SampleSeries(s[self._ts_col], s[self._te_col], s[self._val_col])
+
+
 class MultiSeriesCache(SeriesCache):
     """Cache that holds one pandas DataFrame per registered series.
 
@@ -121,8 +198,8 @@ class CombinedSeriesCache(SeriesCache):
     """Resolve channel leaves *and* registered-series leaves from one cache.
 
     In the cogroup path a container's rows arrive from two places: the channels
-    table (wrapped by a per-solver channel cache — ``DeltaTimeSeriesCache``,
-    ``KVSTimeSeriesCache``, …) and one or more registered series (one pandas
+    table (wrapped by the shared ``ChannelTimeSeriesCache``) and one or more
+    registered series (one pandas
     frame each). A single expression may reference both kinds of leaf, but
     ``selection.build`` takes one cache. This cache routes by access path:
 

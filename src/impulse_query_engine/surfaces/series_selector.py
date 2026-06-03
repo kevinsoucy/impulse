@@ -68,7 +68,6 @@ class SeriesSelector(TimeSeriesSelector):
         *,
         predicate: PredicateFn,
         description: str,
-        entity_scoped: bool = False,
         per_entity_windowing: bool = False,
         id_alias: str | None = None,
         id_limit: int | None = None,
@@ -77,16 +76,12 @@ class SeriesSelector(TimeSeriesSelector):
         self._series = series
         self._predicate = predicate
         self._description = description
-        # Two orthogonal axes (see docs/.../series.mdx, the entity-event tiers):
-        #   entity_scoped         — the leaf is grouped per ``(signal, entity)``
-        #                           (``entity_intervals``); ``False`` is plain
-        #                           presence (``build``). ``.any()`` ⇒ False,
-        #                           ``.each()`` / ``.ids()`` ⇒ True.
-        #   per_entity_windowing  — the leaf SPLITS output one window per entity
-        #                           (``.each()``). ``.any()`` / ``.any().ids()``
-        #                           merge to one window. Only ever True when
-        #                           entity_scoped is True.
-        self._entity_scoped = entity_scoped
+        # per_entity_windowing — the leaf SPLITS output one window per entity
+        #   (``.each()``). ``.any()`` / ``.any().ids()`` merge to one window.
+        # The ``entity_scoped`` axis (grouped per ``(signal, entity)`` via
+        # ``entity_intervals``, vs plain presence via ``build``) is derived: a
+        # leaf is entity-scoped exactly when it splits per entity or projects ids
+        # (``.each()`` / ``.ids()``). See the ``entity_scoped`` property.
         self._per_entity_windowing = per_entity_windowing
         # Identity projection: when set, this leaf's matched entity ids are
         # emitted into the event ``entity_key`` under ``id_alias``, capped at
@@ -111,7 +106,7 @@ class SeriesSelector(TimeSeriesSelector):
         self._uses_alias = False
         # selector_id machinery on TimeSeriesSelector reads str(self._expr).
         self._expr = _SeriesTagExpression(
-            series.name, description, entity_scoped, per_entity_windowing, id_alias, id_limit
+            series.name, description, per_entity_windowing, id_alias, id_limit
         )
 
     @property
@@ -124,7 +119,10 @@ class SeriesSelector(TimeSeriesSelector):
 
     @property
     def entity_scoped(self) -> bool:
-        return self._entity_scoped
+        """Whether the leaf is grouped per ``(signal, entity)`` rather than plain
+        presence. Derived: a leaf is entity-scoped exactly when it splits per
+        entity (``.each()``) or projects entity ids (``.ids()``)."""
+        return self._per_entity_windowing or self._id_alias is not None
 
     @property
     def per_entity_windowing(self) -> bool:
@@ -166,7 +164,6 @@ class SeriesSelector(TimeSeriesSelector):
             self._series,
             predicate=self._predicate,
             description=self._description,
-            entity_scoped=True,
             per_entity_windowing=self._per_entity_windowing,
             id_alias=as_,
             id_limit=limit,
@@ -329,7 +326,8 @@ def _scope_suffix(leaf: "SeriesSelector | _SeriesTagExpression") -> str:
     same predicate but different windowing / projection get distinct selector
     ids (no false dedup) and distinct event definition hashes.
     """
-    if not leaf._entity_scoped:
+    entity_scoped = leaf._per_entity_windowing or leaf._id_alias is not None
+    if not entity_scoped:
         verb = "any"
     elif leaf._per_entity_windowing:
         verb = "each"
@@ -337,7 +335,7 @@ def _scope_suffix(leaf: "SeriesSelector | _SeriesTagExpression") -> str:
         # entity-scoped but merged window — an ``.any().ids()`` roster leaf.
         verb = "any"
     if leaf._id_alias is None:
-        return f":{verb}" if leaf._entity_scoped or leaf._per_entity_windowing else ""
+        return f":{verb}" if entity_scoped else ""
     return f":{verb}.ids({leaf._id_alias},{leaf._id_limit})"
 
 
@@ -346,21 +344,19 @@ class _SeriesTagExpression:
     stable string identity for ``selector_id`` / dedup without pretending
     to be a real EAV tag expression."""
 
-    __slots__ = ("_series_name", "_description", "_entity_scoped", "_per_entity_windowing",
+    __slots__ = ("_series_name", "_description", "_per_entity_windowing",
                  "_id_alias", "_id_limit")
 
     def __init__(
         self,
         series_name: str,
         description: str,
-        entity_scoped: bool,
         per_entity_windowing: bool = False,
         id_alias: str | None = None,
         id_limit: int | None = None,
     ) -> None:
         self._series_name = series_name
         self._description = description
-        self._entity_scoped = entity_scoped
         self._per_entity_windowing = per_entity_windowing
         self._id_alias = id_alias
         self._id_limit = id_limit

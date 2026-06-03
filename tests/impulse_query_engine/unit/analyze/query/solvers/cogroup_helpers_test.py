@@ -10,16 +10,13 @@ import pandas as pd
 import pytest
 
 from impulse_query_engine.analyze.query.solvers.blob_solver import BlobSolver
-from impulse_query_engine.analyze.query.solvers.delta_solver import (
-    DeltaSolver,
-    DeltaTimeSeriesCache,
-)
+from impulse_query_engine.analyze.query.solvers.delta_solver import DeltaSolver
 from impulse_query_engine.analyze.query.solvers.empty_cache import EmptyTimeSeriesCache
 from impulse_query_engine.analyze.query.solvers.key_value_store_solver import (
     KeyValueStoreSolver,
-    KVSTimeSeriesCache,
 )
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.analyze.query.solvers.series_cache import ChannelTimeSeriesCache
 from impulse_query_engine.surfaces import Series, SeriesAccessor
 
 _SCHEMA_COLS = ["container_id", "sensor_type", "entity_id", "distance_m"]
@@ -176,12 +173,14 @@ def test_build_reduced_cache_unknown_leaf_returns_none():
 
 def test_channel_cache_cls_per_solver():
     # Unbound call (the method does not use self), so no Spark session needed.
-    assert DeltaSolver._channel_cache_cls(None) is DeltaTimeSeriesCache
-    assert KeyValueStoreSolver._channel_cache_cls(None) is KVSTimeSeriesCache
+    # Both grouped-map solvers now return the one shared ChannelTimeSeriesCache.
+    assert DeltaSolver._channel_cache_cls(None) is ChannelTimeSeriesCache
+    assert KeyValueStoreSolver._channel_cache_cls(None) is ChannelTimeSeriesCache
 
 
 def test_channel_cache_cls_unsupported_solver_raises():
-    # BlobSolver (RDD-based) has no inline channel cache → series queries fail
-    # loud with an actionable message naming the solvers that support them.
-    with pytest.raises(NotImplementedError, match="DeltaSolver or KeyValueStoreSolver"):
+    # The base is an internal backstop (user-facing rejection of unsupported
+    # solvers happens at QueryBuilder._require_series_support); a solver with no
+    # channel cache still fails loud rather than silently dropping channel leaves.
+    with pytest.raises(NotImplementedError, match="provides no channel cache"):
         BlobSolver()._channel_cache_cls()
