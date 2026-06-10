@@ -29,6 +29,7 @@ class MeasurementDBConfig:
         channel_metrics_table=None,
         channels_uri=None,
         channel_mapping_table=None,
+        unit_conversion_table=None,
         table_locations: str = "external_locations",
     ):
         self.container_tags_table = container_tags_table
@@ -37,6 +38,7 @@ class MeasurementDBConfig:
         self.channel_metrics_table = channel_metrics_table
         self.channels_uri = channels_uri
         self.channel_mapping_table = channel_mapping_table
+        self.unit_conversion_table = unit_conversion_table
         self.table_locations = table_locations
         self.debug_tables = None
 
@@ -45,6 +47,7 @@ class MeasurementDBConfig:
         catalog_name: str,
         core_schema_name: str = "core",
         channel_mapping_table: str | None = None,
+        unit_conversion_table: str | None = None,
     ):
         return MeasurementDBConfig(
             container_tags_table=f"{catalog_name}.{core_schema_name}.container_tags",
@@ -53,6 +56,7 @@ class MeasurementDBConfig:
             channel_metrics_table=f"{catalog_name}.{core_schema_name}.channel_metrics",
             channels_uri=f"{catalog_name}.{core_schema_name}.channels",
             channel_mapping_table=channel_mapping_table,
+            unit_conversion_table=unit_conversion_table,
             table_locations="unity_catalog",
         )
 
@@ -70,6 +74,9 @@ class MeasurementDBConfig:
             channels_uri="channels" if "channels" in debug_tables else None,
             channel_mapping_table=(
                 "channel_mapping" if "channel_mapping" in debug_tables else None
+            ),
+            unit_conversion_table=(
+                "unit_conversion" if "unit_conversion" in debug_tables else None
             ),
             table_locations="debug",
         )
@@ -89,9 +96,7 @@ class MeasurementDB:
         # reach the same registry. Built-in channels are not registered here —
         # their column roles live in SolverConfig, so the solver contributes the
         # channels Series into its effective registry at solve time.
-        self._series_registry: dict[
-            str, tuple["Series", Callable[[SparkSession], DataFrame]]
-        ] = {}
+        self._series_registry: dict[str, tuple["Series", Callable[[SparkSession], DataFrame]]] = {}
 
     def register_series(
         self,
@@ -227,6 +232,11 @@ class MeasurementDB:
         if self.config.channel_mapping_table is None:
             raise ValueError("channel_mapping_table is not configured")
         return self._read_table(spark, self.config.channel_mapping_table)
+
+    def unit_conversion(self, spark) -> DataFrame:
+        if self.config.unit_conversion_table is None:
+            raise ValueError("unit_conversion_table is not configured")
+        return self._read_table(spark, self.config.unit_conversion_table)
 
     def channel_uri(self):
         return self.config.channels_uri

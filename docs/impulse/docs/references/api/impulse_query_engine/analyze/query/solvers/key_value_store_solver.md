@@ -150,6 +150,16 @@ columns, then applies the top-level ``project_id`` filter and any
 per-table ``channel_mapping.filters``, and finally joins with
 channel_metrics to resolve aliases.
 
+When the database is configured with a ``unit_conversion_table`` and
+the ``channel_mapping`` table carries ``source_unit`` / ``target_unit``
+columns, this method also propagates the effective unit pair on each
+resolved row.  The effective ``source_unit`` is computed as
+``COALESCE(channel_metrics.unit, channel_mapping.source_unit)`` so
+that the authoritative per-channel physical unit on
+``channel_metrics`` takes precedence over the mapping-level default
+when present.  ``target_unit`` is always taken from the mapping —
+there is no analogous column on ``channel_metrics``.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
@@ -160,7 +170,9 @@ channel_metrics to resolve aliases.
 **Returns**:
 
 `pyspark.sql.DataFrame`: DataFrame with ``(container_id, channel_id, selector_ids)``
-where ``selector_ids`` is an array column.
+where ``selector_ids`` is an array column.  When unit conversion
+is active (see above), also carries ``source_unit`` and
+``target_unit`` columns.
 
 #### resolve\_channel\_selections
 
@@ -171,15 +183,37 @@ def resolve_channel_selections(spark, channel_metrics_df,
 
 Union direct and aliased channel metrics, combining selector_ids.
 
+When the aliased side carries ``source_unit`` / ``target_unit``
+columns (added by :meth:`filter_aliased_channel_metrics` when a
+unit conversion table is configured), those columns are preserved
+through the union and aggregation.  Direct selectors produce null
+unit columns, which causes the downstream conversion-factor join
+in :meth:`solve` to leave their values unchanged.
+
+Validates that each ``(container_id, channel_id)`` carries at most
+one distinct ``source_unit`` and one distinct ``target_unit``.  Per
+physical channel the unit-conversion model can attach only one
+factor; conflicting aliases would otherwise pick an arbitrary
+target and silently mis-convert one of them.
+
 **Arguments**:
 
 - `spark` (`SparkSession`): Spark session used for query execution.
 - `channel_metrics_df` (`pyspark.sql.DataFrame`): Direct channel metrics with ``selector_ids`` array column.
 - `aliased_channel_metrics_df` (`pyspark.sql.DataFrame`): Aliased channel metrics with ``selector_ids`` array column.
 
+**Raises**:
+
+- `ValueError`: If two or more aliased selectors resolve to the same physical
+channel with conflicting ``source_unit`` or ``target_unit``
+values.  Up to three offending channels are listed in the
+message.
+
 **Returns**:
 
-`pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``.
+`pyspark.sql.DataFrame`: Merged DataFrame with ``(container_id, channel_id, selector_ids)``
+(plus ``source_unit`` / ``target_unit`` when present on the
+aliased side).
 
 #### solve
 
@@ -188,6 +222,13 @@ def solve(query, channels_df, selections, dtypes) -> DataFrame
 ```
 
 Solve the query by grouping channels and applying selections.
+
+When a ``unit_conversion_table`` is configured on the database and
+*channels_df* carries ``source_unit`` / ``target_unit`` columns
+(added upstream by :meth:`filter_aliased_channel_metrics`),
+per-channel conversion factors are computed and propagated into
+the grouped-map UDF so that time-series values are converted from
+the source to the target unit on the fly.
 
 **Arguments**:
 

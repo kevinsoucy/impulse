@@ -15,7 +15,6 @@ from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
     ImpulseConfig,
-    MeasurementDimensions,
     MetricFilter,
     QueryEngine,
     Solvers,
@@ -104,9 +103,9 @@ def test_entity_event_in_report_populates_entity_key(spark, basic_narrow_db):
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
+            "container_id",
+            "start_ts",
+            "stop_ts",
         ],
     )
 
@@ -164,7 +163,9 @@ def test_signal_isin_keeps_same_entity_id_distinct_per_signal(spark, basic_narro
             channel_metrics_table="spark_catalog.silver.channel_metrics",
             channels_uri="spark_catalog.silver.channels",
         ),
-        unity_sink=UnitySink(catalog="spark_catalog", schema="gold", table_prefix="signal_filter_test"),
+        unity_sink=UnitySink(
+            catalog="spark_catalog", schema="gold", table_prefix="signal_filter_test"
+        ),
         container_filters=ContainerFilters(
             metric_filters=[
                 [
@@ -181,9 +182,9 @@ def test_signal_isin_keeps_same_entity_id_distinct_per_signal(spark, basic_narro
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
+            "container_id",
+            "start_ts",
+            "stop_ts",
         ],
     )
 
@@ -199,11 +200,15 @@ def test_signal_isin_keeps_same_entity_id_distinct_per_signal(spark, basic_narro
         lambda spark: spark.createDataFrame(_SAME_ID_THREE_SIGNALS_ROWS, _OBJECT_TRACKS_SCHEMA),
     )
     ot = db.query.series("object_tracks")
-    expr = (ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)).each().ids(as_="object")
+    expr = (
+        (ot.sensor_type.isin(["lidar", "fusion"]) & (ot.distance_m < 8.0)).each().ids(as_="object")
+    )
     my_report.add_event(EntityEvent(name="close_object", expr=expr))
 
     my_report.determine_report()
-    rows = [r for r in my_report.event_dfs["ENTITY_EVENT"]["changed"].collect() if r.container_id == 1]
+    rows = [
+        r for r in my_report.event_dfs["ENTITY_EVENT"]["changed"].collect() if r.container_id == 1
+    ]
 
     # lidar-47 and fusion-47 are two distinct entities; radar-47 is pruned.
     assert len(rows) == 2
@@ -256,9 +261,9 @@ def test_reduced_path_entity_key_matches_raw_frame_oracle(spark, basic_narrow_db
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
+            "container_id",
+            "start_ts",
+            "stop_ts",
         ],
     )
 
@@ -374,9 +379,9 @@ def test_colliding_entities_survive_unchanged_merge_persist(spark, basic_narrow_
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
+            "container_id",
+            "start_ts",
+            "stop_ts",
         ],
     )
 

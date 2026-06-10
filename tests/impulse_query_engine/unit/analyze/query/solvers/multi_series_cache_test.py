@@ -60,7 +60,7 @@ class _RecordingChannelCache(SeriesCache):
         self.resolved.append(selection)
         return pd.DataFrame({"candidate": [selection]})
 
-    def load_blob(self, mid, cid):
+    def load_blob(self, mid, cid, uses_alias: bool = False):
         self.loaded.append((mid, cid))
         return f"blob:{mid}:{cid}"
 

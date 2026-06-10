@@ -151,7 +151,10 @@ class TestKeyValueStoreSolverUDF:
                 return self._v
 
         result = KeyValueStoreSolver._grouped_map_solve_udf(
-            pdf, selections=[_MockSelection()], col_map=DEFAULT_COL_MAP, cache_cls=ChannelTimeSeriesCache
+            pdf,
+            selections=[_MockSelection()],
+            col_map=DEFAULT_COL_MAP,
+            cache_cls=ChannelTimeSeriesCache,
         )
         assert "container_id" in result.columns
         assert result["container_id"].iloc[0] == pdf["container_id"].iloc[0]
@@ -176,7 +179,10 @@ class TestKeyValueStoreSolverUDF:
                 return self._v
 
         result = KeyValueStoreSolver._grouped_map_solve_udf(
-            pdf, selections=[_MockSelection()], col_map=CUSTOM_COL_MAP, cache_cls=ChannelTimeSeriesCache
+            pdf,
+            selections=[_MockSelection()],
+            col_map=CUSTOM_COL_MAP,
+            cache_cls=ChannelTimeSeriesCache,
         )
         assert "meas_id" in result.columns
         assert "container_id" not in result.columns
@@ -269,6 +275,7 @@ class TestKeyValueStoreSolverEndToEndWideOnly:
             "ts": "tstart",
             "te": "tend",
             "val": "value",
+            "conv": "conversion_factor",
         }
 
     def test_config_properties_return_internal_names(self, spark: SparkSession):

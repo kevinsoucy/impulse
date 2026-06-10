@@ -28,7 +28,6 @@ from impulse_reporting.config.config_parser import (
     Comparator,
     ContainerFilters,
     ImpulseConfig,
-    MeasurementDimensions,
     MetricFilter,
     QueryEngine,
     Solvers,
@@ -95,9 +94,9 @@ def _report(spark, table_prefix: str) -> Report:
         ),
         query_engine=QueryEngine(solver=Solvers.KEY_VALUE_STORE_SOLVER),
         measurement_dimensions=[
-            MeasurementDimensions.CONTAINER_ID,
-            MeasurementDimensions.START_TS,
-            MeasurementDimensions.STOP_TS,
+            "container_id",
+            "start_ts",
+            "stop_ts",
         ],
     )
     return Report(

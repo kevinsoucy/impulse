@@ -24,7 +24,7 @@ class SeriesCache(ABC):
         pass
 
     @abstractmethod
-    def load_blob(self, mid, cid) -> SampleSeries:
+    def load_blob(self, mid, cid, uses_alias: bool = False) -> SampleSeries:
         """
         Resolve given mid and cid to a series.
 
@@ -34,6 +34,13 @@ class SeriesCache(ABC):
             Container or measurement ID.
         cid : Any
             Channel ID.
+        uses_alias : bool, optional
+            ``True`` when the calling selector resolves the channel via a
+            ``channel_mapping`` alias.  Caches that perform unit conversion
+            (:class:`ChannelTimeSeriesCache` on the KVS path) only apply the
+            per-channel conversion factor when this is ``True``, so a direct selector
+            on the same physical channel always returns raw values.
+            Defaults to ``False`` (direct / no-conversion semantics).
 
         Returns
         -------
@@ -104,6 +111,11 @@ class ChannelTimeSeriesCache(SeriesCache):
         self._ts_col = col_map["ts"]
         self._te_col = col_map["te"]
         self._val_col = col_map["val"]
+        # Optional per-channel unit-conversion factor. Present only on the KVS
+        # solve path with a unit_conversion table configured; the column rides
+        # in the channel metadata, so it stays in mdf/pdf (not in the drop list).
+        self._conv_col = col_map.get("conv")
+        self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
 
         meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
         self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
@@ -131,9 +143,15 @@ class ChannelTimeSeriesCache(SeriesCache):
         idx = selection._expr.build_pandas(self.mdf)
         return self.mdf[idx]
 
-    def load_blob(self, mid, cid) -> SampleSeries:
+    def load_blob(self, mid, cid, uses_alias: bool = False) -> SampleSeries:
         """
         Load a time series blob from the DataFrame.
+
+        When the rows carry a unit-conversion factor (``col_map["conv"]``) **and**
+        the caller resolved the channel through an alias (``uses_alias=True``),
+        values are multiplied by that per-channel factor. A direct selector on
+        the same physical channel (``uses_alias=False``) always returns raw
+        values — conversion is a property of the alias, not the channel.
 
         Parameters
         ----------
@@ -141,6 +159,9 @@ class ChannelTimeSeriesCache(SeriesCache):
             Container or measurement ID.
         cid : Any
             Channel ID.
+        uses_alias : bool, optional
+            ``True`` when the calling selector resolved via ``channel_mapping``.
+            Gates the per-channel conversion factor; defaults to ``False``.
 
         Returns
         -------
@@ -148,7 +169,12 @@ class ChannelTimeSeriesCache(SeriesCache):
             The loaded sample series object.
         """
         s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
-        return SampleSeries(s[self._ts_col], s[self._te_col], s[self._val_col])
+        values = s[self._val_col]
+        if self._has_conversion and len(s) > 0 and uses_alias:
+            factor = s[self._conv_col].iloc[0]
+            if pd.notna(factor):
+                values = values * factor
+        return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
 
 class MultiSeriesCache(SeriesCache):
@@ -190,7 +216,7 @@ class MultiSeriesCache(SeriesCache):
     def resolve(self, selection) -> pd.DataFrame:
         return pd.DataFrame()
 
-    def load_blob(self, mid, cid) -> SampleSeries:
+    def load_blob(self, mid, cid, uses_alias: bool = False) -> SampleSeries:
         return SampleSeries.empty()
 
 
@@ -233,8 +259,8 @@ class CombinedSeriesCache(SeriesCache):
     def resolve(self, selection) -> pd.DataFrame:
         return self._channel_cache.resolve(selection)
 
-    def load_blob(self, mid, cid) -> SampleSeries:
-        return self._channel_cache.load_blob(mid, cid)
+    def load_blob(self, mid, cid, uses_alias: bool = False) -> SampleSeries:
+        return self._channel_cache.load_blob(mid, cid, uses_alias)
 
     def get(self, series_name: str) -> pd.DataFrame:
         return self._series.get(series_name, pd.DataFrame())
