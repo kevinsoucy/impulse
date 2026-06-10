@@ -218,7 +218,7 @@ def test_reduced_path_entity_key_matches_raw_frame_oracle(spark, basic_narrow_db
     identical per-entity ``entity_key`` maps for the same data.
 
     ``entity_key`` is rendered twice by different code: the Spark per-entity
-    reduction stage (``_reduce_group_udf`` → ``render_entity_key``) on the
+    reduction stage (``_synthesize_intervals`` → ``render_entity_key``) on the
     production path, and ``EntityEvent.materialize_per_container`` over a raw
     ``MultiSeriesCache`` on the oracle path. ``MultiSeriesCache`` exists solely as
     that oracle, but nothing asserted the two agree — this closes that gap so a

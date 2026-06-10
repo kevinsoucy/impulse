@@ -327,8 +327,39 @@ class QuerySolver(ABC):
             else:
                 df = df.withColumn(self.REDUCED_TEND, next_close)
 
+        return self._synthesize_intervals(df, leaves, cid, signal_col, entity_cols)
+
+    # ------------------------------------------------------------------
+    # Layer 2 — Spark-native interval synthesis (ADR-2). Replaces the
+    # per-``(container, signal, entity)`` ``applyInPandas`` dispatch (the
+    # ~800 µs/group cost the S-7 load test measured): the leaf predicate
+    # boolean is evaluated in a *batched* Arrow UDF (option B — the existing
+    # TSAL closure over many tracks per call, no per-track dispatch), then
+    # contiguous true-runs are coalesced into ``[tstart, tend)`` interval sets
+    # with Spark window functions (gaps-and-islands). The output is identical
+    # to the old per-group reduction: one row per ``(container, leaf, signal,
+    # entity)`` with merged interval arrays, plus a per-container marker row so
+    # a container with data but no match still resolves to empty downstream.
+    # ------------------------------------------------------------------
+
+    def _exploded_schema(self) -> T.StructType:
+        """Long-format predicate output: one row per matching ``(raw row, leaf)``,
+        carrying that row's synthesized ``[ts, te)`` close before coalescing."""
+        return T.StructType(
+            [
+                T.StructField(self.config.container_id_col, T.LongType()),
+                T.StructField("leaf_key", T.IntegerType()),
+                T.StructField("signal", T.StringType()),
+                T.StructField("entity", T.StringType()),
+                T.StructField("ts", T.DoubleType()),
+                T.StructField("te", T.DoubleType()),
+            ]
+        )
+
+    def _synthesize_intervals(self, df, leaves, cid, signal_col, entity_cols) -> DataFrame:
+        """Predicate (batched Arrow UDF) → coalesce (Spark windows) → markers."""
         udf = partial(
-            QuerySolver._reduce_group_udf,
+            QuerySolver._predicate_explode_udf,
             leaves=leaves,
             cid_col=cid,
             signal_col=signal_col,
@@ -336,61 +367,119 @@ class QuerySolver(ABC):
             tstart_col=self.REDUCED_TSTART,
             tend_col=self.REDUCED_TEND,
         )
-        group_cols = [cid, signal_col, *entity_cols]
-        return df.groupBy(*group_cols).applyInPandas(udf, self._reduced_schema())
+        exploded = df.mapInPandas(udf, self._exploded_schema())
+        coalesced = QuerySolver._coalesce_intervals(exploded, cid)
+        return self._with_markers(coalesced, df, cid)
 
     @staticmethod
-    def _reduce_group_udf(group_df, *, leaves, cid_col, signal_col, entity_cols, tstart_col, tend_col):
-        """Per-``(container, signal, entity)`` body: apply each leaf's predicate,
-        synthesize its interval set, and emit one reduced row per matching leaf."""
-        cols = ["leaf_key", "signal", "entity", "tstarts", "tends"]
-        out_cols = [cid_col, *cols]
-        if group_df is None or len(group_df) == 0:
-            return pd.DataFrame(columns=out_cols)
-
-        cid_val = int(group_df[cid_col].iloc[0])
-        signal_str = render_entity_key(group_df[signal_col].iloc[0])
-        if len(entity_cols) == 0:
-            entity_str = ""
-        elif len(entity_cols) == 1:
-            entity_str = render_entity_key(group_df[entity_cols[0]].iloc[0])
-        else:
-            entity_str = render_entity_key(tuple(group_df[c].iloc[0] for c in entity_cols))
-
-        ts = group_df[tstart_col].to_numpy(dtype=np.float64)
-        te = group_df[tend_col].to_numpy(dtype=np.float64)
-        rows = []
-        for leaf in leaves:
-            mask = np.asarray(leaf._predicate(group_df), dtype=bool)
-            if not mask.any():
+    def _predicate_explode_udf(
+        iterator, *, leaves, cid_col, signal_col, entity_cols, tstart_col, tend_col
+    ):
+        """Batched, vectorized predicate evaluation (ADR-2 option B): for each
+        Arrow batch, call every leaf's TSAL closure row-wise and emit one
+        long-format row per matching ``(row, leaf)``. No ``groupBy`` → none of the
+        per-track pandas dispatch. The closure is signal/entity-agnostic and
+        purely row-wise, so an arbitrary batch (not a whole group) is safe;
+        coalescing into runs happens later in Spark, partitioned by the group key.
+        A batch with no matches yields nothing (the per-container marker, added
+        separately, keeps a data-but-no-match container present)."""
+        for pdf in iterator:
+            if pdf is None or len(pdf) == 0:
                 continue
-            sub_ts = ts[mask]
-            sub_te = te[mask]
-            order = np.argsort(sub_ts, kind="mergesort")
-            ivs = Intervals(
-                sub_ts[order], sub_te[order], merge_overlaps=True, del_last_empty=True
-            )
-            if len(ivs) == 0:
-                continue
-            rows.append(
-                (
-                    cid_val,
-                    leaf._reduce_key,
-                    signal_str,
-                    entity_str,
-                    [float(x) for x in ivs.tstarts],
-                    [float(x) for x in ivs.tends],
+            cid_vals = pdf[cid_col].to_numpy()
+            signal = pdf[signal_col].map(render_entity_key).to_numpy()
+            if len(entity_cols) == 0:
+                entity = np.full(len(pdf), "", dtype=object)
+            elif len(entity_cols) == 1:
+                entity = pdf[entity_cols[0]].map(render_entity_key).to_numpy()
+            else:
+                ent_arrays = [pdf[c].to_numpy() for c in entity_cols]
+                entity = np.array(
+                    [render_entity_key(tuple(a[i] for a in ent_arrays)) for i in range(len(pdf))],
+                    dtype=object,
                 )
+            ts = pdf[tstart_col].to_numpy(dtype=np.float64)
+            te = pdf[tend_col].to_numpy(dtype=np.float64)
+            frames = []
+            for leaf in leaves:
+                mask = np.asarray(leaf._predicate(pdf), dtype=bool)
+                if not mask.any():
+                    continue
+                frames.append(
+                    pd.DataFrame(
+                        {
+                            cid_col: cid_vals[mask],
+                            "leaf_key": np.int32(leaf._reduce_key),
+                            "signal": signal[mask],
+                            "entity": entity[mask],
+                            "ts": ts[mask],
+                            "te": te[mask],
+                        }
+                    )
+                )
+            if frames:
+                yield pd.concat(frames, ignore_index=True)
+
+    @staticmethod
+    def _coalesce_intervals(exploded, cid) -> DataFrame:
+        """Coalesce contiguous true-runs into merged ``[tstart, tend)`` sets per
+        ``(container, leaf, signal, entity)`` via gaps-and-islands, reproducing
+        ``Intervals(merge_overlaps=True, del_last_empty=True)`` row-for-row. A new
+        run begins where ``ts`` is strictly past the running-max end (touching
+        intervals merge, real gaps split); each run is ``[min ts, max te)``. Empty
+        runs (``ts >= te``) are dropped — ``del_last_empty=True`` drops *all*
+        empties (``intervals.py``), which this filter matches exactly; a trailing
+        zero-length point either absorbs into its run without moving its bounds or
+        forms its own empty run that drops, so the result is unchanged."""
+        part = [cid, "leaf_key", "signal", "entity"]
+        order = Window.partitionBy(*part).orderBy("ts", "te")
+        cummax = order.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        runs = (
+            exploded.withColumn("__cm", F.max("te").over(cummax))
+            .withColumn("__prev", F.lag("__cm").over(order))
+            .withColumn(
+                "__rs",
+                F.when(F.col("__prev").isNull(), F.lit(1))
+                .when(F.col("ts") > F.col("__prev"), F.lit(1))
+                .otherwise(F.lit(0)),
             )
-        if not rows:
-            # The group has rows but no leaf matched. Emit a marker (null
-            # leaf_key) so the container still reaches the per-container worker
-            # and resolves to an empty result — matching the pre-reduction
-            # behaviour where every container *with data* produced a row. A
-            # container with no series rows at all has no group, so it stays
-            # absent (the series-side filter prune relies on this).
-            rows.append((cid_val, None, None, None, [], []))
-        return pd.DataFrame(rows, columns=out_cols)
+            .withColumn("__rid", F.sum("__rs").over(order))
+            .groupBy(*part, "__rid")
+            .agg(F.min("ts").alias("ts"), F.max("te").alias("te"))
+            .filter(F.col("ts") < F.col("te"))
+        )
+        ivs = F.sort_array(F.collect_list(F.struct("ts", "te")))
+        return (
+            runs.groupBy(*part)
+            .agg(ivs.alias("__ivs"))
+            .withColumn("tstarts", F.transform("__ivs", lambda x: x["ts"]))
+            .withColumn("tends", F.transform("__ivs", lambda x: x["te"]))
+            .drop("__ivs")
+        )
+
+    def _with_markers(self, coalesced, df, cid) -> DataFrame:
+        """Re-add a per-container marker (null ``leaf_key``, empty intervals) for
+        every container that had source rows but produced no interval, so it still
+        reaches the per-container worker and resolves to empty — matching the
+        pre-Layer-2 behaviour. One marker per container suffices:
+        ``_build_reduced_cache`` skips null-key rows, so only the container's
+        presence in the reduced stream matters. A container with no series rows at
+        all has no source row and so stays absent (the filter prune relies on it)."""
+        markers = (
+            df.select(cid)
+            .distinct()
+            .join(coalesced.select(cid).distinct(), on=cid, how="left_anti")
+            .select(
+                F.col(cid),
+                F.lit(None).cast(T.IntegerType()).alias("leaf_key"),
+                F.lit(None).cast(T.StringType()).alias("signal"),
+                F.lit(None).cast(T.StringType()).alias("entity"),
+                F.array().cast(T.ArrayType(T.DoubleType())).alias("tstarts"),
+                F.array().cast(T.ArrayType(T.DoubleType())).alias("tends"),
+            )
+        )
+        cols = [f.name for f in self._reduced_schema().fields]
+        return coalesced.select(*cols).unionByName(markers.select(*cols))
 
     @staticmethod
     def _build_reduced_cache(reduced_pdf, channel_cache):
