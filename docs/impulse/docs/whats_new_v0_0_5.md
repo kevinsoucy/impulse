@@ -1,11 +1,11 @@
 ---
 sidebar_position: 3
-title: What's New & Upgrading in 1.0
+title: What's New & Upgrading in v0.0.5
 ---
 
-# What's New in Impulse 1.0
+# What's New in Impulse v0.0.5
 
-Impulse 1.0 adds **series**: support for time-series tables where
+Impulse v0.0.5 adds **series**: support for time-series tables where
 many things can exist at the same instant, each carrying a wide row of typed
 columns. ADAS object detections, defect inspections, lap events, diagnostic
 trouble codes — all fit this shape.
@@ -17,7 +17,7 @@ data (camera, lidar, radar detections) that 0.x's scalar channels couldn't
 represent. Series make that data queryable, and the rest of this page is the
 generalization that fell out of it.
 
-**Everything from 0.x still works exactly as before — 1.0 is purely additive.**
+**Everything from 0.x still works exactly as before — v0.0.5 is purely additive.**
 It opens a new data shape without changing anything you already do. The
 [Upgrading from 0.x](#upgrading-from-0x) section below is the short answer to
 "is it safe to bump the version?" (yes).
@@ -27,7 +27,7 @@ It opens a new data shape without changing anything you already do. The
 ## In one sentence
 
 In 0.x you could query **scalar channels** — one number per signal per moment.
-In 1.0 you can also query **series** — your own tables, of any shape — and
+In v0.0.5 you can also query **series** — your own tables, of any shape — and
 combine the two in a single expression.
 
 A series doesn't require multiple rows per instant: a wide, single-row table
@@ -40,7 +40,7 @@ like an IMU — several values per instant, some non-numeric — is a series wit
 
 **1. Query data where many entities share a timestamp.**
 A 0.x channel holds one value per `(signal, time)`. A camera frame holds twenty
-objects at once. 1.0 lets you register that table as-is and query it.
+objects at once. v0.0.5 lets you register that table as-is and query it.
 
 **2. Query string and multi-column data.**
 0.x predicates were numeric only. Series columns can be strings too, with
@@ -53,7 +53,7 @@ predicate and the event also records *which* object / unit / driver triggered it
 
 **4. Correlate two independent entities in time.**
 "A cyclist was close *while* a car decelerated sharply" — two different objects,
-overlapping in time. 0.x had no way to express this; 1.0 does, by composing two
+overlapping in time. 0.x had no way to express this; v0.0.5 does, by composing two
 finalized predicates with `&`.
 
 **5. Query across several time-series tables at once.**
@@ -78,7 +78,7 @@ count adds no stages). See
 [How a cross-series query runs](references/query_engine.mdx#how-a-cross-series-query-runs)
 for the map-reduce picture. The only real limit is how much data one recording
 holds, so compact dense detection data upstream (see
-[Best practices](user_guide_1_0.md#best-practices)).
+[Best practices](user_guide_v0_0_5.md#best-practices)).
 
 **6. Bring your own table — no reshaping.**
 Register a table in about five lines by mapping your column names to the engine's
@@ -90,7 +90,7 @@ be empty.
 
 ## What stayed the same
 
-| 0.x capability | Status in 1.0 |
+| 0.x capability | Status in v0.0.5 |
 |---|---|
 | Scalar channels and the channels table | Unchanged |
 | `query.channel(...)` | Unchanged — **not** deprecated |
@@ -113,7 +113,7 @@ fix — everything in the table above behaves exactly as it did in 0.x.
 
 ### Will anything behave differently if I just bump the version?
 
-Your **query results are identical.** There is one correctness fix in 1.0
+Your **query results are identical.** There is one correctness fix in v0.0.5
 (interval union with a fully-contained interval), but it lives on a code path
 that channel data never reaches — channel intervals always have non-decreasing
 ends, so the old bug could not occur for channel queries.
@@ -128,7 +128,7 @@ changes in a way that doesn't break existing logic:
 2. **`event_instance_id` is now a `bigint`** (it was an `int`). The values were
    always produced as 64-bit anyway; the declared type now matches.
 
-Impulse evolves your existing table automatically on the first 1.0 write — **both**
+Impulse evolves your existing table automatically on the first v0.0.5 write — **both**
 persist paths handle it: the `replaceWhere` write (changed event definitions) and
 the `MERGE` write (unchanged / incremental definitions, the steady-state path).
 There is no manual migration: existing rows read back with `entity_key = NULL`,
@@ -150,13 +150,13 @@ Re-running a 0.x report won't duplicate rows or break the merge.
       declare `event_instance_id` as `bigint`. If your downstream reads the table
       as-is, there's nothing to do.
 - [ ] That's it. When you're ready for the new capabilities, see the
-      [User Guide](user_guide_1_0.md).
+      [User Guide](user_guide_v0_0_5.md).
 
 ---
 
 ## Where to go next
 
-- **[User Guide](user_guide_1_0.md)** — channels vs series, the metadata tables,
+- **[User Guide](user_guide_v0_0_5.md)** — channels vs series, the metadata tables,
   querying multiple tables, what's required vs optional.
 - **[Series reference](references/series.mdx)** — the deep dive: registration
   options, predicate operators, per-entity reporting, cross-entity correlation.

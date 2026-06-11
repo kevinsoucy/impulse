@@ -1,11 +1,11 @@
 ---
 sidebar_position: 4
-title: User Guide (1.0)
+title: User Guide (v0.0.5)
 ---
 
-# Impulse 1.0 User Guide
+# Impulse v0.0.5 User Guide
 
-This guide is the map. It explains how Impulse 1.0 thinks about your data — the
+This guide is the map. It explains how Impulse v0.0.5 thinks about your data — the
 difference between channels and series, how the metadata tables fit together,
 how to query across several tables at once, and what's required versus nice to
 have. For the deep dive on series specifically, see the
@@ -53,7 +53,7 @@ something did. An entity key is scoped to its signal: object `47` seen by the
 lidar and object `47` seen by the radar are two different things.
 
 A channel is simply the smallest possible series — one value column, no
-entities. Nothing in 1.0 is bolted on; series are the general case and channels
+entities. Nothing in v0.0.5 is bolted on; series are the general case and channels
 are the simple one.
 
 Reach for channels when you have **many sensors each sampling on its own
@@ -65,7 +65,7 @@ query do (see [Best practices](#best-practices)).
 
 ## The data model: what's required, what's optional
 
-Impulse reads a few tables. In 1.0, fewer of them are mandatory than you might
+Impulse reads a few tables. In v0.0.5, fewer of them are mandatory than you might
 expect.
 
 | Table | What it holds | Required? |
@@ -83,7 +83,7 @@ channels, no channel-metadata tables.
 
 ## Three ways to name a signal
 
-All three coexist in 1.0. None is deprecated — they're just different ways to
+All three coexist in v0.0.5. None is deprecated — they're just different ways to
 point at data.
 
 ```python
@@ -203,7 +203,7 @@ operator details, see the [Series reference](references/series.mdx).
 plain integers — no unit conversion, no resampling — so every series and the
 recording metadata must share the **same unit and epoch**. A mismatch isn't caught
 at runtime; it quietly gives wrong answers. Align once, upstream at ingest — the
-single most important rule in 1.0.
+single most important rule in v0.0.5.
 
 **Keep dense series small at ingest.** A camera running at 10 Hz for 30 minutes
 with 200 objects per frame is millions of rows per recording. Three upstream
@@ -243,5 +243,5 @@ own series or channel.
   and the time-axis precondition in full.
 - **[Getting Started](getting_started.md)** — run a report end-to-end in five
   minutes.
-- **[What's New & Upgrading in 1.0](whats_new_1_0.md)** — the new capabilities
-  and the (safe) 0.x → 1.0 upgrade.
+- **[What's New & Upgrading in v0.0.5](whats_new_v0_0_5.md)** — the new capabilities
+  and the (safe) 0.x → v0.0.5 upgrade.
