@@ -50,9 +50,7 @@ class _ColumnProxy:
     def _partial(self, predicate, description: str, signal_values=None) -> "_PartialPredicate":
         from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
 
-        return _PartialPredicate(
-            self._series, predicate, description, signal_values=signal_values
-        )
+        return _PartialPredicate(self._series, predicate, description, signal_values=signal_values)
 
     def _is_signal_column(self) -> bool:
         return self._column == self._series.signal_col
@@ -60,9 +58,7 @@ class _ColumnProxy:
     def _make_comparison(self, op: str, value) -> "_PartialPredicate":
         # Only an equality on the signal column yields an enumerable
         # source-prune constraint; other comparisons (ne / lt / ...) do not.
-        signal_values = (
-            frozenset({value}) if op == "eq" and self._is_signal_column() else None
-        )
+        signal_values = frozenset({value}) if op == "eq" and self._is_signal_column() else None
         return self._partial(
             _comparison_predicate(self._column, op, value),
             f"{self._column} {op} {value!r}",

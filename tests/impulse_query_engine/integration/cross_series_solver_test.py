@@ -224,7 +224,9 @@ class TestCrossSeriesMultiSeriesCogroup:
         db = key_value_store_db
         # container 1: object close [0,10) AND sign present [5,15) → intersect [5,10).
         # container 2: object close [0,10) only, no sign → conjunction empty.
-        _register_object_tracks(db, rows=[(1, "lidar", 0, 10, 47, 5.0), (2, "lidar", 0, 10, 47, 5.0)])
+        _register_object_tracks(
+            db, rows=[(1, "lidar", 0, 10, 47, 5.0), (2, "lidar", 0, 10, 47, 5.0)]
+        )
         _register_traffic_signs(db, rows=[(1, "camera", 5, 15, 12, "speed_30")])
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
@@ -266,9 +268,7 @@ class TestCrossSeriesMultiSeriesCogroup:
         solver = KeyValueStoreSolver(spark, config=_kvs_cfg())
         query = db.query
         obj = (query.series("object_tracks").distance_m < 8.0).each().alias("obj")
-        sign = (query.series("traffic_signs").sign_class == "speed_30").each().alias(
-            "sign"
-        )
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each().alias("sign")
         result = query.select(obj, sign).solve(spark=spark, solver=solver)
         row = {r.container_id: r for r in result.collect()}[1]
         assert row["obj"] == [[0.0, 10.0]]
@@ -301,9 +301,7 @@ class TestCrossSeriesMultiSeriesCogroup:
         query = db.query
         rpm = query.channel(channel_name="Engine RPM").mean().alias("rpm_mean")
         obj = (query.series("object_tracks").distance_m < 8.0).each().alias("obj")
-        sign = (query.series("traffic_signs").sign_class == "speed_30").each().alias(
-            "sign"
-        )
+        sign = (query.series("traffic_signs").sign_class == "speed_30").each().alias("sign")
         result = query.select(rpm, obj, sign).solve(spark=spark, solver=solver)
         row = {r.container_id: r for r in result.collect()}[1]
         assert row["rpm_mean"] is not None
@@ -560,9 +558,9 @@ class TestCrossSeriesEdgeCases:
         q1 = key_value_store_db.query
         r1 = q1.select(q1.signal("Engine RPM").mean().alias("m")).solve(spark=spark, solver=solver)
         q2 = key_value_store_db.query
-        r2 = q2.select(
-            q2.channel(channel_name="Engine RPM").mean().alias("m")
-        ).solve(spark=spark, solver=solver)
+        r2 = q2.select(q2.channel(channel_name="Engine RPM").mean().alias("m")).solve(
+            spark=spark, solver=solver
+        )
         assert {r.container_id: r["m"] for r in r1.collect()} == {
             r.container_id: r["m"] for r in r2.collect()
         }

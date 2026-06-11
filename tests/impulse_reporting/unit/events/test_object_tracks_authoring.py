@@ -268,7 +268,9 @@ def test_eval_tree_routes_udf_through_apply_op(drive_42_cache, ot):
 
 def test_entity_event_emits_one_row_per_cyclist(ot):
     event = EntityEvent(name="cyclist_near_miss_per_object", expr=_near_miss_per_object(ot))
-    rows = event.materialize_per_container(42, _mk_cache({"object_tracks": _track_df(DRIVE_42_ROWS)}, DRIVE_42_STOP_TS))
+    rows = event.materialize_per_container(
+        42, _mk_cache({"object_tracks": _track_df(DRIVE_42_ROWS)}, DRIVE_42_STOP_TS)
+    )
     parsed = sorted((r[0], r[1], r[2], json.loads(r[3])) for r in rows)
     # Cyclist 47 close at [4s, 8s); cyclist 91 close at [5s, 7s).
     assert parsed == [
@@ -279,7 +281,9 @@ def test_entity_event_emits_one_row_per_cyclist(ot):
 
 def test_entity_event_yields_no_rows_for_drive_99(ot):
     event = EntityEvent(name="cyclist_near_miss_per_object", expr=_near_miss_per_object(ot))
-    rows = event.materialize_per_container(99, _mk_cache({"object_tracks": _track_df(DRIVE_99_ROWS)}, DRIVE_99_STOP_TS))
+    rows = event.materialize_per_container(
+        99, _mk_cache({"object_tracks": _track_df(DRIVE_99_ROWS)}, DRIVE_99_STOP_TS)
+    )
     assert rows == []
 
 
@@ -416,9 +420,15 @@ def test_cross_entity_entity_event_maps_both_objects(ot):
         name="cyclist_with_decelerating_car",
         expr=_cyclist_close(ot).ids(as_="cyclist") & _car_decel_close(ot).ids(as_="car"),
     )
-    rows = event.materialize_per_container(42, _mk_cache({"object_tracks": _track_df(DRIVE_42_ROWS)}, DRIVE_42_STOP_TS))
+    rows = event.materialize_per_container(
+        42, _mk_cache({"object_tracks": _track_df(DRIVE_42_ROWS)}, DRIVE_42_STOP_TS)
+    )
     # cyclist presence (47:[4,8) ∪ 91:[5,7)) ∩ car presence (217:[5,7)) = [5,7).
     # Both cyclists overlap that window, so the roster lists both.
     assert [(r[1], r[2], json.loads(r[3])) for r in rows] == [
-        (5_000_000.0, 7_000_000.0, {"car": {"fusion": ["217"]}, "cyclist": {"fusion": ["47", "91"]}}),
+        (
+            5_000_000.0,
+            7_000_000.0,
+            {"car": {"fusion": ["217"]}, "cyclist": {"fusion": ["47", "91"]}},
+        ),
     ]

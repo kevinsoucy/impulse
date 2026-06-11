@@ -74,7 +74,13 @@ _RLE_SCHEMA = T.StructType(
     ]
 )
 _RLE_COLS = [
-    "container_id", "sensor_type", "seg_start", "seg_end", "object_id", "magnitude", "detection_class",
+    "container_id",
+    "sensor_type",
+    "seg_start",
+    "seg_end",
+    "object_id",
+    "magnitude",
+    "detection_class",
 ]
 
 
@@ -158,7 +164,9 @@ def _candidate(spark, series, schema, pdf, leaf, stop_ts):
     entities: dict = {}
     presence: dict = {}
     for cid_val, sub in reduced_pdf.groupby(cid):
-        cache = QuerySolver._build_reduced_cache(sub.reset_index(drop=True), EmptyTimeSeriesCache())
+        cache = QuerySolver._build_reduced_cache(
+            sub.reset_index(drop=True), EmptyTimeSeriesCache()
+        )
         entities[int(cid_val)] = _norm_entities(cache.reduced_entities(leaf))
         presence[int(cid_val)] = _norm_intervals(cache.reduced_presence(leaf))
     return entities, presence
@@ -204,16 +212,16 @@ def _assert_equiv(spark, series, schema, pdf, leaf, stop_ts, label):
     ref_ent, ref_pres = _reference(series, pdf, leaf, stop_ts)
     # Containers present on both sides (a container with no source rows produces
     # no group on either path); markers keep a data-but-no-match container.
-    assert set(cand_ent) >= set(ref_ent), (
-        f"[{label}] candidate dropped containers {set(ref_ent) - set(cand_ent)}"
-    )
+    assert set(cand_ent) >= set(
+        ref_ent
+    ), f"[{label}] candidate dropped containers {set(ref_ent) - set(cand_ent)}"
     for c in ref_ent:
-        assert cand_ent[c] == ref_ent[c], (
-            f"\n[{label}] entity DIVERGENCE container={c}\n  ref : {ref_ent[c]}\n  cand: {cand_ent[c]}"
-        )
-        assert cand_pres[c] == ref_pres[c], (
-            f"\n[{label}] presence DIVERGENCE container={c}\n  ref : {ref_pres[c]}\n  cand: {cand_pres[c]}"
-        )
+        assert (
+            cand_ent[c] == ref_ent[c]
+        ), f"\n[{label}] entity DIVERGENCE container={c}\n  ref : {ref_ent[c]}\n  cand: {cand_ent[c]}"
+        assert (
+            cand_pres[c] == ref_pres[c]
+        ), f"\n[{label}] presence DIVERGENCE container={c}\n  ref : {ref_pres[c]}\n  cand: {cand_pres[c]}"
 
 
 # --------------------------------------------------------------------------- #
@@ -222,8 +230,11 @@ def _assert_equiv(spark, series, schema, pdf, leaf, stop_ts, label):
 def test_pit_close_at_next_signal_frame(spark):
     pdf = _pit_frame(
         [
-            (1, 0, 47, 5.0, "ped"), (1, 100, 47, 5.0, "ped"), (1, 200, 47, 5.0, "ped"),
-            (1, 0, 99, 5.0, "ped"), (1, 300, 99, 5.0, "ped"),
+            (1, 0, 47, 5.0, "ped"),
+            (1, 100, 47, 5.0, "ped"),
+            (1, 200, 47, 5.0, "ped"),
+            (1, 0, 99, 5.0, "ped"),
+            (1, 300, 99, 5.0, "ped"),
         ]
     )
     leaf = (SeriesAccessor(_pit_series()).distance_m < 8.0).each()
@@ -253,7 +264,12 @@ def test_pit_time_varying_predicate(spark):
     # The case Layer 1 cannot push but Layer 2 must reduce: predicate evaluated
     # per row on the full stream, then coalesced (gap where it fails).
     pdf = _pit_frame(
-        [(1, 0, 47, 5.0, "ped"), (1, 100, 47, 20.0, "ped"), (1, 200, 47, 4.0, "ped"), (1, 300, 47, 3.0, "ped")]
+        [
+            (1, 0, 47, 5.0, "ped"),
+            (1, 100, 47, 20.0, "ped"),
+            (1, 200, 47, 4.0, "ped"),
+            (1, 300, 47, 3.0, "ped"),
+        ]
     )
     leaf = (SeriesAccessor(_pit_series()).distance_m < 8.0).each()
     _assert_equiv(spark, _pit_series(), _PIT_SCHEMA, pdf, leaf, 400, "pit/time-varying")
@@ -263,7 +279,12 @@ def test_pit_marker_container_present_but_no_match(spark):
     # container 2 has rows but no match → must stay present (marker) and resolve
     # to empty; container 1 matches.
     pdf = _pit_frame(
-        [(1, 0, 47, 5.0, "ped"), (1, 100, 47, 5.0, "ped"), (2, 0, 47, 99.0, "ped"), (2, 100, 47, 99.0, "ped")]
+        [
+            (1, 0, 47, 5.0, "ped"),
+            (1, 100, 47, 5.0, "ped"),
+            (2, 0, 47, 99.0, "ped"),
+            (2, 100, 47, 99.0, "ped"),
+        ]
     )
     leaf = (SeriesAccessor(_pit_series()).distance_m < 8.0).each()
     cand_ent, _ = _candidate(spark, _pit_series(), _PIT_SCHEMA, pdf, leaf, 200)
@@ -333,9 +354,12 @@ def test_rle_zero_length_mid_stream_segment(spark):
 def _pit_kind_frame():
     return _pit_frame(
         [
-            (1, 0, 47, 5.0, "pedestrian"), (1, 100, 47, 12.0, "pedestrian"),
-            (1, 200, 47, 4.0, "pedestrian"), (1, 0, 91, 6.0, "cyclist"),
-            (1, 100, 91, 6.0, "cyclist"), (1, 0, 12, 30.0, "car"),
+            (1, 0, 47, 5.0, "pedestrian"),
+            (1, 100, 47, 12.0, "pedestrian"),
+            (1, 200, 47, 4.0, "pedestrian"),
+            (1, 0, 91, 6.0, "cyclist"),
+            (1, 100, 91, 6.0, "cyclist"),
+            (1, 0, 12, 30.0, "car"),
         ]
     )
 
@@ -354,7 +378,10 @@ def _pit_kind_frame():
         (lambda a: (a.detection_class.isnull()).each(), "str/isnull"),
         (lambda a: (a.detection_class.notnull()).each(), "str/notnull"),
         # Fused same-series AND / OR collapse to one leaf with one closure.
-        (lambda a: ((a.distance_m < 8.0) & (a.detection_class == "pedestrian")).each(), "fused/and"),
+        (
+            lambda a: ((a.distance_m < 8.0) & (a.detection_class == "pedestrian")).each(),
+            "fused/and",
+        ),
         (lambda a: ((a.distance_m > 20.0) | (a.detection_class == "cyclist")).each(), "fused/or"),
     ],
 )
@@ -405,7 +432,9 @@ def test_pit_fuzz_equivalence(spark):
                 # Shared per-(container, signal) tick stream across all entities;
                 # an entity is present only at some ticks (partial presence), so the
                 # next-frame close can be set by a *different* entity's row.
-                ticks = sorted({int(rng.integers(0, 50)) * 10 for _ in range(int(rng.integers(2, 8)))})
+                ticks = sorted(
+                    {int(rng.integers(0, 50)) * 10 for _ in range(int(rng.integers(2, 8)))}
+                )
                 for oid in range(1, int(rng.integers(2, 4))):
                     for t in ticks:
                         if rng.random() < 0.7:

@@ -39,9 +39,7 @@ def test_event_instance_id_is_deterministic_across_builds(spark):
 def test_event_instance_id_distinct_per_window(spark):
     # Same event/container, different windows → different ids (so a re-run that
     # produces a new window does not collide with the old one).
-    df = spark.createDataFrame(
-        [(1, "near", 0, 10, None), (1, "near", 0, 20, None)], _SCHEMA
-    )
+    df = spark.createDataFrame([(1, "near", 0, 10, None), (1, "near", 0, 20, None)], _SCHEMA)
     a, b = _ids(df)
     assert a != b
 

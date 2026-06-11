@@ -321,9 +321,7 @@ def test_any_ids_unions_entities_into_one_window():
 def test_any_ids_roster_truncates_at_limit():
     acc = SeriesAccessor(_object_series())
     event = EntityEvent(name="near", expr=(acc.distance_m < 8.0).any().ids(as_="obj", limit=2))
-    frames = _tracks(
-        [(t, eid, "cyclist", 5.0) for eid in (10, 11, 12, 13) for t in (0, 1)]
-    )
+    frames = _tracks([(t, eid, "cyclist", 5.0) for eid in (10, 11, 12, 13) for t in (0, 1)])
     rows = event.materialize_per_container(1, _mk_cache(frames, 2))
     # Four entities match, but the roster is capped at 2 (smallest ids by sort).
     assert _maps(rows) == [{"obj": {"fusion": ["10", "11"]}}]
@@ -455,9 +453,9 @@ def test_cross_series_conjunction_with_empty_other_series_does_not_fire():
 def test_cross_series_construction_is_accepted():
     obj = SeriesAccessor(_object_series())
     sign = SeriesAccessor(_sign_series())
-    expr = (obj.distance_m < 8.0).any().ids(as_="obj") & (
-        sign.sign_class == "speed_30"
-    ).any().ids(as_="sign")
+    expr = (obj.distance_m < 8.0).any().ids(as_="obj") & (sign.sign_class == "speed_30").any().ids(
+        as_="sign"
+    )
     event = EntityEvent(name="multi", expr=expr)
     assert {leaf.series.name for leaf in EntityEvent._series_leaves(event.expression)} == {
         "object_tracks",
@@ -573,9 +571,7 @@ def test_event_type_string_and_inheritance():
 
 
 def test_serialize_roster_sorts_aliases_and_signals():
-    payload = _serialize_roster(
-        {"cyclist": {"lidar": ["47", "91"]}, "car": {"fusion": ["12"]}}
-    )
+    payload = _serialize_roster({"cyclist": {"lidar": ["47", "91"]}, "car": {"fusion": ["12"]}})
     parsed = json.loads(payload)
     assert parsed == {"car": {"fusion": ["12"]}, "cyclist": {"lidar": ["47", "91"]}}
     assert list(parsed) == ["car", "cyclist"]  # alias keys emitted in sorted order

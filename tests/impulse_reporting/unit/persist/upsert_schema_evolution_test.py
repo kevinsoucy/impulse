@@ -172,12 +172,16 @@ def test_upsert_mixed_basic_and_entity_rows_stay_distinct(spark):
     basic_row = (1, 700, 7, 0, 10, None)
     entity_row = (1, 700, 7, 0, 10, entity_key)
 
-    sink.upsert(spark.createDataFrame([basic_row, entity_row], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    sink.upsert(
+        spark.createDataFrame([basic_row, entity_row], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS
+    )
     assert spark.table(uri).count() == 2  # collide on the id triple, kept distinct
 
     # Re-run: each row updates in place; the NULL-entity_key basic row must not
     # duplicate (it would under plain `=`, since NULL = NULL is never true).
-    sink.upsert(spark.createDataFrame([basic_row, entity_row], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    sink.upsert(
+        spark.createDataFrame([basic_row, entity_row], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS
+    )
     result = spark.table(uri)
     assert result.count() == 2
     assert {r.entity_key for r in result.collect()} == {None, entity_key}
@@ -227,15 +231,21 @@ def test_upsert_entity_key_merge_key_keeps_colliding_entities_distinct(spark):
     key_88 = '{"object_tracks": {"lidar": ["88"]}}'
 
     # Two entities that collide on the id triple but differ by entity_key.
-    sink.upsert(spark.createDataFrame([(1, 500, 7, 0, 10, key_47)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
-    sink.upsert(spark.createDataFrame([(1, 500, 7, 0, 10, key_88)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    sink.upsert(
+        spark.createDataFrame([(1, 500, 7, 0, 10, key_47)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS
+    )
+    sink.upsert(
+        spark.createDataFrame([(1, 500, 7, 0, 10, key_88)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS
+    )
 
     result = spark.table(uri)
     assert result.count() == 2  # both entities preserved, not overwritten
     assert {r.entity_key for r in result.collect()} == {key_47, key_88}
 
     # Re-upserting entity 47 with a changed window updates in place (still 2 rows).
-    sink.upsert(spark.createDataFrame([(1, 500, 7, 0, 99, key_47)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS)
+    sink.upsert(
+        spark.createDataFrame([(1, 500, 7, 0, 99, key_47)], _NEW_SCHEMA), uri, _ENTITY_MERGE_KEYS
+    )
     result = spark.table(uri)
     assert result.count() == 2
     by_key = {r.entity_key: r for r in result.collect()}

@@ -84,7 +84,9 @@ def test_combined_routes_get_to_series_frames_not_channel_cache():
 
 
 def test_combined_missing_series_returns_empty_frame():
-    cache = CombinedSeriesCache(_RecordingChannelCache(), {"object_tracks": pd.DataFrame({"x": [1]})})
+    cache = CombinedSeriesCache(
+        _RecordingChannelCache(), {"object_tracks": pd.DataFrame({"x": [1]})}
+    )
     out = cache.get("traffic_signs")
     assert isinstance(out, pd.DataFrame) and out.empty
 

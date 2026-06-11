@@ -321,9 +321,7 @@ class QuerySolver(ABC):
             next_close = F.col("__red_next").cast("double")
             if stop_df is not None:
                 df = df.join(F.broadcast(stop_df), on=cid, how="left")
-                df = df.withColumn(
-                    self.REDUCED_TEND, F.coalesce(next_close, F.col("__red_stop"))
-                )
+                df = df.withColumn(self.REDUCED_TEND, F.coalesce(next_close, F.col("__red_stop")))
             else:
                 df = df.withColumn(self.REDUCED_TEND, next_close)
 

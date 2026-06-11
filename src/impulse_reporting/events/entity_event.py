@@ -73,9 +73,11 @@ def _eval_tree(
         return leaf_intervals[id(expr)]
     if isinstance(expr, TimeSeriesOp):
         args = [
-            _eval_tree(a, leaf_intervals, cache, build_cache)
-            if isinstance(a, TimeSeriesExpression)
-            else a
+            (
+                _eval_tree(a, leaf_intervals, cache, build_cache)
+                if isinstance(a, TimeSeriesExpression)
+                else a
+            )
             for a in expr.args
         ]
         kwargs = {
@@ -245,8 +247,15 @@ class EntityEvent(BasicEvent):
             sub[id(split)] = iv
             rows.extend(
                 self._emit_windows(
-                    container_id, expr, sub, split, split_key,
-                    merged_leaves, entity_iv, cache, build_cache,
+                    container_id,
+                    expr,
+                    sub,
+                    split,
+                    split_key,
+                    merged_leaves,
+                    entity_iv,
+                    cache,
+                    build_cache,
                 )
             )
         return rows
@@ -277,7 +286,9 @@ class EntityEvent(BasicEvent):
         return rows
 
     @staticmethod
-    def _roster(window, split_leaf, split_key, merged_leaves, entity_iv) -> dict[str, dict[str, list[str]]]:
+    def _roster(
+        window, split_leaf, split_key, merged_leaves, entity_iv
+    ) -> dict[str, dict[str, list[str]]]:
         """Alias-keyed, signal-scoped entity ids for one emitted *window*:
         ``{alias: {signal: [ids]}}``.
 
@@ -368,9 +379,7 @@ class EntityEvent(BasicEvent):
             .withColumn("end_ts", f.col("end_ts").cast("long"))
             .withColumn(
                 "event_instance_id",
-                generate_event_instance_id_column(
-                    event_type=cls, entity_key_col="entity_key"
-                ),
+                generate_event_instance_id_column(event_type=cls, entity_key_col="entity_key"),
             )
             .withColumn(
                 "event_id",

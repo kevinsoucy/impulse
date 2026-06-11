@@ -24,6 +24,7 @@ from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
 from impulse_query_engine.analyze.query.solvers.series_cache import ChannelTimeSeriesCache
 from impulse_query_engine.surfaces import Series, SeriesAccessor
 
+
 def _series() -> Series:
     import pyspark.sql.types as T
 

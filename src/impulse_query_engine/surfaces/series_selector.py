@@ -344,8 +344,7 @@ class _SeriesTagExpression:
     stable string identity for ``selector_id`` / dedup without pretending
     to be a real EAV tag expression."""
 
-    __slots__ = ("_series_name", "_description", "_per_entity_windowing",
-                 "_id_alias", "_id_limit")
+    __slots__ = ("_series_name", "_description", "_per_entity_windowing", "_id_alias", "_id_limit")
 
     def __init__(
         self,

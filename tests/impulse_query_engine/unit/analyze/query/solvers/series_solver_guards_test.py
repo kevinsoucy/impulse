@@ -45,9 +45,7 @@ def _stops(out) -> dict:
 
 
 def test_stop_ts_one_row_per_container_is_preserved(spark):
-    metrics = spark.createDataFrame(
-        [(1, 100.0), (2, 300.0)], "container_id long, stop_ts double"
-    )
+    metrics = spark.createDataFrame([(1, 100.0), (2, 300.0)], "container_id long, stop_ts double")
     out = _solver(spark)._container_stop_ts_df(metrics)
     assert out.count() == 2
     assert _stops(out) == {1: 100.0, 2: 300.0}
