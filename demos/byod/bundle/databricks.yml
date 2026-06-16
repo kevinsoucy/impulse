@@ -1,0 +1,104 @@
+# Databricks Asset Bundle — ADAS demo (Impulse + ADAS BYOD,
+# ADAS data domain).
+#
+# Two structural choices vs. earlier `byod_demo` bundle:
+#
+#   1. Wheels are built and uploaded by DAB on `bundle deploy` via the
+#      `artifacts` block — no more manual `uv build && databricks fs cp` step.
+#      Wheels land at `${workspace.root_path}/artifacts/.internal/`.
+#   2. A `notebook_env.yml` ships alongside the bundle so SAs can attach the
+#      same dependency set to interactive serverless notebook runs (Environment
+#      side panel → Custom → select the file).
+#
+# Provisions:
+#   - 2 jobs: bootstrap_job + run_all_job
+#
+# Schemas (silver, perception_silver, gold) and volumes (raw, camera_frames,
+# lidar_scans, openlabel_packages) are created by the first cell of
+# `demos/byod/01_ingest.py` via `CREATE SCHEMA IF NOT EXISTS` and
+# `CREATE VOLUME IF NOT EXISTS`. They are deliberately NOT bundle-managed —
+# binding schema/volume creation to the bundle's Terraform state means any
+# state disturbance (CLI version bump, lost `.databricks/` dir, different
+# machine) can propose a destructive `recreate` on resources that hold
+# customer data.
+#
+# Adapter selection happens at deploy time via --var "adapter=<name>".
+#
+# Two shared (production) deployments: `mini` (NuScenes v1.0-mini) and `full`
+# (NuScenes v1.0-trainval). Each lands in its own schema set + root_path.
+#
+# Deploy:    databricks bundle deploy -t mini --var "catalog=<cat>" --profile <ws>
+#            databricks bundle deploy -t full --var "catalog=<cat>" --profile <ws>
+# Run:       databricks bundle run bootstrap_job -t <mini|full> --var "catalog=<cat>" --profile <ws>
+#            databricks bundle run run_all_job   -t <mini|full> --var "catalog=<cat>" --profile <ws>
+# Tear down: databricks bundle destroy -t <mini|full> --profile <ws>
+
+bundle:
+  name: demo
+
+include:
+  - resources/jobs.yml
+
+# The bundle lives inside demos/byod/ (at demos/byod/bundle/). The notebooks,
+# lib, and adapter packages are in its parent dir; the impulse src/ they import
+# is higher up the tree. `sync.paths` extends the sync root up to the repo root
+# so both the demo notebooks and the impulse src/ are visible to the deployed
+# jobs. With `sync.paths: [../../..]`, the sync root becomes `repos/impulse/`,
+# and notebook_path entries in resources/jobs.yml point at the sibling demo dir
+# (`../../<notebook>`).
+sync:
+  paths:
+    - ../../..
+
+# DAB-managed wheel builds. `uv build --wheel` runs from each `path:`, produces
+# a wheel in `dist/`, DAB uploads it to `${workspace.root_path}/artifacts/.internal/`.
+# Job environments + notebook_env.yml reference these uploaded paths.
+artifacts:
+  impulse_wheel:
+    type: whl
+    build: uv build --wheel
+    path: ../../..
+  byod_demo_wheel:
+    type: whl
+    build: uv build --wheel
+    path: ..
+
+variables:
+  adapter:
+    description: "Adapter name (e.g. nuscenes, a2d2). Must match a package under demos/byod/adapters/."
+    default: nuscenes
+
+  dataset_version:
+    description: "Adapter-specific dataset variant. Default targets NuScenes v1.0-mini; resolves to the adapter's default_version when overridden adapter has its own default."
+    default: v1.0-mini
+
+  catalog:
+    description: "Unity Catalog to deploy into. Must already exist; deploying user needs USE CATALOG + CREATE SCHEMA. Required — supply at deploy time via --var \"catalog=<name>\"."
+
+  schema_prefix:
+    description: "Prefix for the demo's three schemas. Schemas created: <prefix>_silver, <prefix>_perception_silver, <prefix>_gold."
+    default: demo
+
+targets:
+  # Two shared (production) deployments side by side, distinguished by dataset
+  # variant + schema_prefix and isolated by root_path. notebook_env.yml
+  # references absolute paths under each target's root.
+
+  # NuScenes v1.0-mini → demo_mini_{silver,perception_silver,gold}.
+  mini:
+    mode: production
+    default: true
+    variables:
+      dataset_version: v1.0-mini
+      schema_prefix: demo_mini
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/mini
+
+  # NuScenes v1.0-trainval (full) → demo_trainval_{silver,perception_silver,gold}.
+  full:
+    mode: production
+    variables:
+      dataset_version: v1.0-trainval
+      schema_prefix: demo_trainval
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/full

@@ -54,6 +54,7 @@ Full license text: [https://opensource.org/licenses/BSD-3-Clause](https://openso
 | idna | 3.12 | Python | runtime | Kim Davies <kim+pypi@gumleaf.org> | [https://github.com/kjd/idna](https://github.com/kjd/idna) |
 | protobuf | 6.33.6 | Python | runtime | protobuf@googlegroups.com | [https://developers.google.com/protocol-buffers/](https://developers.google.com/protocol-buffers/) |
 | pycparser | 3.0 | Python | runtime | Eli Bendersky <eliben@gmail.com> | [https://github.com/eliben/pycparser](https://github.com/eliben/pycparser) |
+| shapely | 2.1.2 | Python | runtime | Sean Gillies and Shapely contributors | [https://github.com/shapely/shapely](https://github.com/shapely/shapely) |
 
 ---
 
