@@ -1,111 +1,21 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from functools import partial
 from typing import TYPE_CHECKING
 
-import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import DataFrame, Window
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
-from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
-from .series_cache import SeriesCache
+from .series_cache import ChannelTimeSeriesCache
 from .solver_config import SolverConfig
 from .utils.interval_encoder import IntervalEncoder
 
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
-
-
-class KVSTimeSeriesCache(SeriesCache):
-    def __init__(self, pdf, col_map: dict[str, str]):
-        """
-        Initialize the KVSTimeSeriesCache.
-
-        Parameters
-        ----------
-        pdf : pd.DataFrame
-            DataFrame containing time series data.  When the column named by
-            ``col_map["conv"]`` is present, :meth:`load_blob` multiplies the
-            loaded values by that per-channel factor.  All rows of a given
-            ``(cid, ch)`` slice are expected to share the same factor.
-        col_map : dict[str, str]
-            Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
-            ``"val"``, ``"conv"`` to the actual column names in *pdf*.  The
-            ``"conv"`` column is optional in *pdf*.
-        """
-        self._cid_col = col_map["cid"]
-        self._ch_col = col_map["ch"]
-        self._ts_col = col_map["ts"]
-        self._te_col = col_map["te"]
-        self._val_col = col_map["val"]
-        self._conv_col = col_map.get("conv")
-        self._has_conversion = self._conv_col is not None and self._conv_col in pdf.columns
-
-        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
-
-    def resolve(self, selection):
-        """
-        Resolve selected tags/metrics to a list of candidates.
-
-        Parameters
-        ----------
-        selection : Any
-            The selection object specifying tags or metrics.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing the resolved candidates.
-        """
-        if "selector_ids" in self.mdf.columns:
-            idx = self.mdf["selector_ids"].apply(
-                lambda arr: arr is not None and selection.selector_id in arr
-            )
-            return self.mdf[idx]
-        idx = selection._expr.build_pandas(self.mdf)
-        return self.mdf[idx]
-
-    def load_blob(self, mid, cid, uses_alias: bool = False):
-        """
-        Load a time series blob from the DataFrame.
-
-        When the underlying *pdf* carries a conversion-factor column (the
-        column named by ``col_map["conv"]``) **and** the caller is an
-        aliased selector (``uses_alias=True``), the returned values are
-        multiplied by that factor.  Direct selectors on the same physical
-        channel always receive raw values — unit conversion is a property
-        of the alias, not of the channel.
-
-        Parameters
-        ----------
-        mid : Any
-            Container or measurement ID.
-        cid : Any
-            Channel ID.
-        uses_alias : bool, optional
-            ``True`` when the calling selector resolved via channel_mapping.
-            Gates the per-channel conversion factor; defaults to ``False``.
-
-        Returns
-        -------
-        SampleSeries
-            The loaded sample series object.
-        """
-        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
-        values = s[self._val_col]
-        if self._has_conversion and len(s) > 0 and uses_alias:
-            factor = s[self._conv_col].iloc[0]
-            if pd.notna(factor):
-                values = values * factor
-        return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
 
 class KeyValueStoreSolver(QuerySolver):
@@ -138,6 +48,8 @@ class KeyValueStoreSolver(QuerySolver):
         silver layer.
     """
 
+    supports_registered_series = True
+
     def __init__(
         self,
         spark,
@@ -153,6 +65,9 @@ class KeyValueStoreSolver(QuerySolver):
             timestamp_col_name="timestamp",
             drop_implausible_data_points=self.drop_implausible_data,
         )
+
+    def _channel_cache_cls(self):
+        return ChannelTimeSeriesCache
 
     # ------------------------------------------------------------------
     # Solver stages
@@ -743,36 +658,6 @@ class KeyValueStoreSolver(QuerySolver):
     # Solve
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]) -> pd.DataFrame:
-        """
-        UDF to solve for a single container by applying selections.
-
-        Parameters
-        ----------
-        pdf : pd.DataFrame
-        selections : Iterable
-            List of selection expressions to apply.
-        col_map : dict[str, str]
-            Column name mapping for the cache.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing results for each selection.
-        """
-        cache = KVSTimeSeriesCache(pdf, col_map=col_map)
-        cid_col = col_map["cid"]
-        result = {cid_col: [pdf[cid_col].iloc[0]]}
-        for s in selections:
-            res = s.build(cache)
-            if hasattr(res, "serialize") and callable(res.serialize):
-                res = res.serialize()
-            elif hasattr(res, "get_data") and callable(res.get_data):
-                res = res.get_data()
-            result[s._alias] = [res]
-        return pd.DataFrame(result)
-
     def solve(self, query, channels_df, selections, dtypes) -> DataFrame:
         """
         Solve the query by grouping channels and applying selections.
@@ -800,7 +685,6 @@ class KeyValueStoreSolver(QuerySolver):
         pyspark.sql.DataFrame
             DataFrame containing results for each container.
         """
-        col_map = self.config.col_map
         source_unit_col = self.config.source_unit_col
         target_unit_col = self.config.target_unit_col
 
@@ -823,15 +707,7 @@ class KeyValueStoreSolver(QuerySolver):
             # Calculate the tend info and prepare the data for the solving step.
             q = self.interval_encoder.prepare_channels_df(q)
 
-        schema_entries = [T.StructField(self.config.container_id_col, T.LongType())]
-        for s, dtype in zip(selections, dtypes, strict=False):
-            schema_entries.append(T.StructField(s._alias, dtype))
-        schema = T.StructType(schema_entries)
-        solve_udf = F.pandas_udf(
-            partial(KeyValueStoreSolver._solve_udf, selections=selections, col_map=col_map),
-            schema,
-            F.PandasUDFType.GROUPED_MAP,
-        )
+        solve_udf, schema = self._grouped_map_udf(selections, dtypes, ChannelTimeSeriesCache)
         df = q.join(
             F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
         )
@@ -839,9 +715,8 @@ class KeyValueStoreSolver(QuerySolver):
         container_count = channels_df.select(self.config.container_id_col).distinct().count()
         if container_count == 0:
             return self.spark.createDataFrame([], schema=schema)
-        res = (
+        return (
             df.repartition(container_count, self.config.container_id_col)
             .groupBy(self.config.container_id_col)
             .apply(solve_udf)
         )
-        return res

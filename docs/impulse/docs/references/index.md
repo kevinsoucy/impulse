@@ -6,11 +6,12 @@ options and API documentation.
 ## Available References
 
 - [Report](report.md) - Report generation and output formats
-- [Query Engine](query_engine.md) - Solver overview and how to pick between `DeltaSolver` and `KeyValueStoreSolver`
+- [Query Engine](query_engine.mdx) - Solver overview and how to pick between `DeltaSolver` and `KeyValueStoreSolver`
 - [TSAL](tsal.md) - Time-Series Analysis Language syntax and usage
 - [Event](event.md) - Event detection and processing
 - [Aggregation](aggregation.md) - Aggregation methods and configurations
 - [Persist](persistence.md) - Storage and persistence options for reports and results
+- [Series](series.mdx) - First-class query support for per-frame and per-event tables (ADAS object tracks, defect records, lap events, DTC occurrences)
 - [API Reference](api/) - Auto-generated symbol-level API docs from source-code docstrings
 
 ## Overview

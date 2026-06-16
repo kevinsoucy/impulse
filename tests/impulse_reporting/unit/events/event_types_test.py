@@ -1,3 +1,6 @@
+import types
+
+import pyspark.sql.types as T
 import pytest
 from pyspark.sql.types import StructType
 
@@ -96,7 +99,12 @@ def test_unsupported_event_type():
 def test_get_any_for_fact_table():
     """Test that get_any_for_fact_table returns a valid EventType."""
     et = EventType.get_any_for_fact_table("event_instance_fact")
-    assert et in (EventType.BASIC_EVENT, EventType.CONTAINER_EVENT)
+    assert et in (
+        EventType.ENTITY_EVENT,
+        EventType.BASIC_EVENT,
+        EventType.CONTAINER_EVENT,
+        EventType.SEQUENCE_OF_EVENTS,
+    )
 
 
 def test_get_any_for_fact_table_unknown():
@@ -108,7 +116,12 @@ def test_get_any_for_fact_table_unknown():
 def test_get_any_for_dimension_table():
     """Test that get_any_for_dimension_table returns a valid EventType."""
     et = EventType.get_any_for_dimension_table("event_dimension")
-    assert et in (EventType.BASIC_EVENT, EventType.CONTAINER_EVENT)
+    assert et in (
+        EventType.ENTITY_EVENT,
+        EventType.BASIC_EVENT,
+        EventType.CONTAINER_EVENT,
+        EventType.SEQUENCE_OF_EVENTS,
+    )
     assert et.get_dimension_table_name() == "event_dimension"
 
 
@@ -126,3 +139,56 @@ def test_get_any_for_dimension_table_unknown():
     """Test that unknown table name raises ValueError."""
     with pytest.raises(ValueError, match="No EventType found"):
         EventType.get_any_for_dimension_table("non_existent_table")
+
+
+def _group_events(events: list):
+    """Run Report._group_events_by_type over *events* without building a Report.
+
+    The method only reads ``self.events`` and the module-level ``EventType``.
+    """
+    from impulse_reporting.core.report import Report
+
+    stub = types.SimpleNamespace(events=events)
+    return Report._group_events_by_type(stub)
+
+
+def test_entity_event_dispatches_to_most_specific_type_not_its_base():
+    # EntityEvent subclasses BasicEvent. _group_events_by_type must route each
+    # event to the MOST SPECIFIC matching type, so an EntityEvent lands in
+    # ENTITY_EVENT (carrying its per-entity scope) and is never misfiled as a
+    # BASIC_EVENT. This holds regardless of EventType declaration order, so the
+    # routing is correct by construction rather than by a fragile ordering.
+    from impulse_query_engine.surfaces import Series, SeriesAccessor
+    from impulse_reporting.events.basic_event import BasicEvent
+    from impulse_reporting.events.entity_event import EntityEvent
+
+    assert issubclass(EntityEvent, BasicEvent)  # the relationship that makes this matter
+
+    schema = T.StructType(
+        [
+            T.StructField("container_id", T.LongType(), False),
+            T.StructField("sensor_type", T.StringType(), False),
+            T.StructField("tstart", T.LongType(), False),
+            T.StructField("tend", T.LongType(), False),
+            T.StructField("entity_id", T.LongType(), False),
+            T.StructField("distance_m", T.DoubleType()),
+        ]
+    )
+    series = Series(
+        name="object_tracks",
+        schema=schema,
+        session_col="container_id",
+        signal_col="sensor_type",
+        tstart_col="tstart",
+        tend_col="tend",
+        entity_key="entity_id",
+    )
+    ot = SeriesAccessor(series)
+    entity_event = EntityEvent(name="close", expr=(ot.distance_m < 8.0).each())
+    basic_event = BasicEvent(name="present", expr=(ot.distance_m < 8.0).any())
+
+    grouped = _group_events([entity_event, basic_event])
+
+    assert grouped["ENTITY_EVENT"] == [entity_event]
+    assert grouped["BASIC_EVENT"] == [basic_event]
+    assert entity_event not in grouped["BASIC_EVENT"]

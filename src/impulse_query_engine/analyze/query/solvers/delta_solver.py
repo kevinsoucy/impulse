@@ -1,90 +1,18 @@
-from collections.abc import Iterable
-from functools import partial
-
-import pandas as pd
 import pyspark.sql.functions as F
-import pyspark.sql.types as T
 from pyspark.sql import DataFrame
 
 from impulse_query_engine.analyze.metadata.metric_expression import MetricExpression
 from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
-from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
-from .series_cache import SeriesCache
+from .series_cache import ChannelTimeSeriesCache
 from .solver_config import SolverConfig
 from .utils.interval_encoder import IntervalEncoder
 
 
-class DeltaTimeSeriesCache(SeriesCache):
-    def __init__(self, pdf, col_map: dict[str, str]):
-        """
-        Initialize the DeltaTimeSeriesCache.
-
-        Parameters
-        ----------
-        pdf : pd.DataFrame
-            DataFrame containing time series data.
-        col_map : dict[str, str]
-            Mapping with keys ``"cid"``, ``"ch"``, ``"ts"``, ``"te"``,
-            ``"val"`` to the actual column names in *pdf*.
-        """
-        self._cid_col = col_map["cid"]
-        self._ch_col = col_map["ch"]
-        self._ts_col = col_map["ts"]
-        self._te_col = col_map["te"]
-        self._val_col = col_map["val"]
-
-        meta = pdf.drop(columns=[self._ts_col, self._te_col, self._val_col])
-        self.mdf = meta.drop_duplicates(subset=[self._cid_col, self._ch_col]).reset_index()
-        self.pdf = pdf.sort_values([self._cid_col, self._ch_col, self._ts_col]).reset_index()
-
-    def resolve(self, selection):
-        """
-        Resolve selected tags/metrics to a list of candidates.
-
-        Parameters
-        ----------
-        selection : Any
-            The selection object specifying tags or metrics.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing the resolved candidates.
-        """
-        if "selector_ids" in self.mdf.columns:
-            idx = self.mdf["selector_ids"].apply(
-                lambda arr: arr is not None and selection.selector_id in arr
-            )
-            return self.mdf[idx]
-        idx = selection._expr.build_pandas(self.mdf)
-        return self.mdf[idx]
-
-    def load_blob(self, mid, cid, uses_alias: bool = False):
-        """
-        Load a time series blob from the DataFrame.
-
-        Parameters
-        ----------
-        mid : Any
-            Container or measurement ID.
-        cid : Any
-            Channel ID.
-        uses_alias : bool, optional
-            Unused by this cache (no unit conversion); accepted for
-            interface compatibility with :class:`SeriesCache`.
-
-        Returns
-        -------
-        SampleSeries
-            The loaded sample series object.
-        """
-        s = self.pdf[(self.pdf[self._cid_col] == mid) & (self.pdf[self._ch_col] == cid)]
-        return SampleSeries(s[self._ts_col], s[self._te_col], s[self._val_col])
-
-
 class DeltaSolver(QuerySolver):
+    supports_registered_series = True
+
     def __init__(
         self,
         spark,
@@ -119,6 +47,9 @@ class DeltaSolver(QuerySolver):
             timestamp_col_name="timestamp",
             drop_implausible_data_points=self.drop_implausible_data,
         )
+
+    def _channel_cache_cls(self):
+        return ChannelTimeSeriesCache
 
     def filter_container_tags(self, spark, query) -> DataFrame:
         """
@@ -304,37 +235,6 @@ class DeltaSolver(QuerySolver):
         )
         return metrics
 
-    @staticmethod
-    def _solve_udf(pdf, selections: Iterable, col_map: dict[str, str]):
-        """
-        UDF to solve for a single container by applying selections.
-
-        Parameters
-        ----------
-        pdf : pd.DataFrame
-            DataFrame containing time series data for a container.
-        selections : Iterable
-            List of selection expressions to apply.
-        col_map : dict[str, str]
-            Column name mapping for the cache.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing results for each selection.
-        """
-        cache = DeltaTimeSeriesCache(pdf, col_map=col_map)
-        cid_col = col_map["cid"]
-        result = {cid_col: [pdf[cid_col].iloc[0]]}
-        for s in selections:
-            res = s.build(cache)
-            if hasattr(res, "serialize") and callable(res.serialize):
-                res = res.serialize()
-            elif hasattr(res, "get_data") and callable(res.get_data):
-                res = res.get_data()
-            result[s._alias] = [res]
-        return pd.DataFrame(result)
-
     def solve(self, query, channels_df, selections, dtypes):
         """
         Solve the query by grouping channels and applying selections.
@@ -355,8 +255,6 @@ class DeltaSolver(QuerySolver):
         pyspark.sql.DataFrame
             DataFrame containing results for each container.
         """
-        col_map = self.config.col_map
-
         q = query.db.channels(self.spark)
         q = self._apply_column_mapping(q, self.config.channels.column_name_mapping)
 
@@ -364,18 +262,8 @@ class DeltaSolver(QuerySolver):
             # Calculate the tend info and prepare the data for the solving step.
             q = self.interval_encoder.prepare_channels_df(q)
 
-        schema_entries = [T.StructField(self.config.container_id_col, T.LongType())]
-        for s, dtype in zip(selections, dtypes, strict=False):
-            schema_entries.append(T.StructField(s._alias, dtype))
-        schema = T.StructType(schema_entries)
-
-        solve_udf = F.pandas_udf(
-            partial(DeltaSolver._solve_udf, selections=selections, col_map=col_map),
-            schema,
-            F.PandasUDFType.GROUPED_MAP,
-        )
+        solve_udf, _schema = self._grouped_map_udf(selections, dtypes, ChannelTimeSeriesCache)
         df = q.join(
             F.broadcast(channels_df), on=[self.config.container_id_col, self.config.channel_id_col]
         )
-        res = df.groupBy(self.config.container_id_col).apply(solve_udf)
-        return res
+        return df.groupBy(self.config.container_id_col).apply(solve_udf)

@@ -7,7 +7,7 @@ title: Data Model
 :::caution Prerequisite
 
 The schema described on this page is the full silver-layer shape that
-Impulse's [**default solvers**](../references/query_engine.md)
+Impulse's [**default solvers**](../references/query_engine.mdx)
 (`DeltaSolver`, `KeyValueStoreSolver`) recognise. **Landing your data in
 this shape during ingest is the simplest and most maintainable path** —
 see the [Ingestion guide](ingestion.md).
@@ -17,7 +17,7 @@ The default solvers also run on a **subset** of this model.
 `container_metrics`, `channel_metrics`, and `channels` — and treats
 `container_tags` and `channel_mapping` as optional add-ons. `DeltaSolver`
 is the one that requires all five. See
-[Which solver should I use?](../references/query_engine.md#which-solver-should-i-use)
+[Which solver should I use?](../references/query_engine.mdx#which-solver-should-i-use)
 for the decision rule.
 
 Advanced deployments with existing data layouts they cannot or do not want

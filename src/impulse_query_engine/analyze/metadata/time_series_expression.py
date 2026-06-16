@@ -548,6 +548,17 @@ class TimeSeriesSelector(TimeSeriesExpression, RequiresDeserialization):
         return self._uses_alias
 
     @property
+    def leaf_kind(self) -> str:
+        """Discriminator identifying which upstream series this leaf reads.
+
+        Channel leaves return ``"channel"``; series leaves override to
+        return the series' registered name. The channel-side
+        filter pipeline (``filter_channel_tags`` / ``filter_channel_metrics``)
+        iterates only over selectors whose ``leaf_kind == "channel"``.
+        """
+        return "channel"
+
+    @property
     def selector_id(self) -> int:
         return zlib.crc32(str(self._expr).encode())
 
@@ -922,14 +933,23 @@ class TimeSeriesOp(TimeSeriesExpression):
             k: a.build(cache) if isinstance(a, TimeSeriesExpression) else a
             for k, a in self.kwargs.items()
         }
+        return self.apply_op(argsb, kwargsb)
+
+    def apply_op(self, argsb: list, kwargsb: dict):
+        """Apply this op to already-built positional/keyword args.
+
+        The single home for the op dispatch, shared by :meth:`build` (which builds
+        args from the cache) and by alternative evaluators that build args some
+        other way (e.g. the per-entity evaluator in ``EntityEvent``, which
+        substitutes pinned per-entity interval sets for the entity leaves). Keeping
+        one dispatch implementation stops those evaluators from drifting on how an
+        op is invoked; a subclass that changes invocation (e.g. ``TimeSeriesUDF``)
+        overrides this, not the recursion.
+        """
         if self.optype == "cls":
             op = getattr(argsb[0], self.operation)
             return op(*argsb[1:], **kwargsb)
-        elif self.optype == "builtin":
-            return self.operation(*argsb, **kwargsb)
-        elif self.optype == "python":
-            return self.operation(*argsb, **kwargsb)
-        # unknown case
+        # builtin / python / unknown all invoke the operation directly.
         return self.operation(*argsb, **kwargsb)
 
     def __str__(self):
@@ -1040,11 +1060,15 @@ class TimeSeriesUDF(TimeSeriesOp):
             k: a.build(cache) if isinstance(a, TimeSeriesExpression) else a
             for k, a in self.kwargs.items()
         }
+        return self.apply_op(argsb, kwargsb)
+
+    def apply_op(self, argsb: list, kwargsb: dict):
+        """UDF dispatch on already-built args (overrides ``TimeSeriesOp.apply_op``
+        so alternative evaluators invoke the UDF the same way ``build`` does)."""
         if isinstance(self.operation, str):
             op = getattr(argsb[0], self.operation)
             return op(*argsb[1:], **kwargsb)
-        else:
-            return self.operation(*argsb, **kwargsb)
+        return self.operation(*argsb, **kwargsb)
 
     def __str__(self):
         """

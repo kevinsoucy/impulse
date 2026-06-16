@@ -17,7 +17,6 @@ maintainers = [
 ]
 dependencies = [
     "lz4==4.4.5",
-    "nptyping==2.5.0",
 ]
 
 # Pre-installed on Databricks Serverless env v4 (and DBR ML runtimes).

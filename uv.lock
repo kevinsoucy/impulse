@@ -258,14 +258,13 @@ wheels = [
 name = "databricks-impulse"
 source = { editable = "." }
 dependencies = [
-    { name = "delta-spark" },
     { name = "lz4" },
-    { name = "nptyping" },
 ]
 
 [package.optional-dependencies]
 local-dev = [
     { name = "databricks-sdk" },
+    { name = "delta-spark" },
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -290,10 +289,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "databricks-sdk", marker = "extra == 'local-dev'", specifier = "==0.106.0" },
-    { name = "delta-spark", specifier = "==4.0.1" },
+    { name = "delta-spark", marker = "extra == 'local-dev'", specifier = "==4.0.1" },
     { name = "lz4", specifier = "==4.4.5" },
     { name = "matplotlib", marker = "extra == 'local-dev'", specifier = "==3.10.0" },
-    { name = "nptyping", specifier = "==2.5.0" },
     { name = "pandas", marker = "extra == 'local-dev'", specifier = "==2.2.3" },
     { name = "pyarrow", marker = "extra == 'local-dev'", specifier = "==19.0.1" },
     { name = "pydantic", marker = "extra == 'local-dev'", specifier = "==2.11.7" },
@@ -590,18 +588,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/24/bf/d1bda4f6168e0b2e9e5958945e01910052158313224ada5ce1fb2e1113b8/nodeenv-1.10.0.tar.gz", hash = "sha256:996c191ad80897d076bdfba80a41994c2b47c68e224c542b48feba42ba00f8bb", size = 55611, upload-time = "2025-12-20T14:08:54.006Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/b2/d0896bdcdc8d28a7fc5717c305f1a861c26e18c05047949fb371034d98bd/nodeenv-1.10.0-py2.py3-none-any.whl", hash = "sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827", size = 23438, upload-time = "2025-12-20T14:08:52.782Z" },
-]
-
-[[package]]
-name = "nptyping"
-version = "2.5.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e1/b7/ffe533358c32506b1708feec0fb04ba0a35a959a94163fff5333671909da/nptyping-2.5.0.tar.gz", hash = "sha256:e3d35b53af967e6fb407c3016ff9abae954d3a0568f7cc13a461084224e8e20a", size = 71623, upload-time = "2023-02-20T21:57:11.814Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/28/92edc05378175de13a3d4986cee7531853634a22b7e5e21a988fa84fde3f/nptyping-2.5.0-py3-none-any.whl", hash = "sha256:764e51836faae33a7ae2e928af574cfb701355647accadcc89f2ad793630b7c8", size = 37602, upload-time = "2023-02-20T21:57:09.61Z" },
 ]
 
 [[package]]

@@ -20,7 +20,33 @@ from impulse_reporting.util.report_entity_util import ReportEntityUtil
 
 
 class BasicEvent(Event):
-    """Class representing a basic event in a report."""
+    """Class representing a basic event in a report.
+
+    ``BasicEvent`` is the single public event constructor. When its expression
+    carries an entity-scoped leaf (``.each()`` / ``.ids()``), construction routes
+    to the per-entity :class:`EntityEvent` implementation so the matched ids land
+    in ``entity_key``; otherwise it stays a session-scoped presence event. A plain
+    ``.any()`` (no ``.ids()``) over an entity-bearing series is still presence, so
+    it remains a ``BasicEvent`` with a NULL ``entity_key``.
+    """
+
+    def __new__(cls, *args, **kwargs):
+        # Route only when called as BasicEvent(...) with an expression that carries
+        # an entity-scoped leaf; the returned instance is a BasicEvent subclass, so
+        # Python runs __init__ once with the original args, dispatching the routed
+        # class's _finalize_bare / _validate_expression hooks (no double init). A
+        # direct EntityEvent(...) (or any other subclass) keeps its own class.
+        #
+        # __new__ must also be callable with no args: pickle reconstructs an
+        # instance via cls.__new__(cls) (no __init__, __dict__ restored directly),
+        # which is how an EntityEvent crosses the Spark UDF boundary. Pull expr
+        # positionally or by keyword and only route when it is actually present.
+        expr = kwargs.get("expr", args[1] if len(args) >= 2 else None)
+        if cls is BasicEvent and expr is not None and cls._entity_leaves(expr):
+            from impulse_reporting.events.entity_event import EntityEvent
+
+            cls = EntityEvent
+        return super().__new__(cls)
 
     def __init__(
         self,
@@ -47,6 +73,8 @@ class BasicEvent(Event):
             Key-value metadata for the event (e.g. limit_type, limit_direction).
         """
         Event.__init__(self, name)
+        expr = self._finalize_bare(expr)
+        self._validate_expression(expr)
         self.expression = expr.alias(name)
         self.description = desc
         self.required_channels = required_channels
@@ -54,6 +82,44 @@ class BasicEvent(Event):
         if attributes is not None:
             normalized_attributes = {str(k): str(v) for k, v in attributes.items()}
         self.attributes = normalized_attributes
+
+    @staticmethod
+    def _series_leaves(expr: TimeSeriesExpression) -> list:
+        from impulse_query_engine.surfaces.series_selector import SeriesSelector
+
+        return [s for s in expr.get_selectors() if isinstance(s, SeriesSelector)]
+
+    @staticmethod
+    def _entity_leaves(expr: TimeSeriesExpression) -> list:
+        return [s for s in BasicEvent._series_leaves(expr) if s.entity_scoped]
+
+    def _finalize_bare(self, expr: TimeSeriesExpression) -> TimeSeriesExpression:
+        """Finalize a bare ``_PartialPredicate`` as a presence leaf.
+
+        A predicate over an entity-bearing series must pick a windowing verb
+        first (``.any()`` / ``.each()``); only a non-entity predicate has a
+        single sensible meaning (presence) and may be auto-finalized.
+        """
+        from impulse_query_engine.surfaces.partial_predicate import _PartialPredicate
+
+        if isinstance(expr, _PartialPredicate):
+            if expr._series.entity_key is not None:
+                raise ValueError(
+                    f"Predicate over entity series {expr._series.name!r} needs a "
+                    "windowing verb: .any() for a presence window, or .each() for "
+                    "per-entity (add .ids(as_=…) to project the matched ids)."
+                )
+            expr = expr._finalize_presence()
+        return expr
+
+    def _validate_expression(self, expr: TimeSeriesExpression) -> None:
+        """A BasicEvent is session-scoped presence; it must not carry
+        entity-scoped leaves — those need EntityEvent's per-entity path."""
+        if self._entity_leaves(expr):
+            raise ValueError(
+                "Expression has entity-scoped leaves (.each() / .ids()); "
+                "use EntityEvent, not BasicEvent, for per-entity reporting."
+            )
 
     def get_id(self) -> int:
         """
@@ -88,25 +154,31 @@ class BasicEvent(Event):
         """
         return "BASIC_EVENT"
 
+    def _definition_str(self) -> str:
+        """The string whose hash defines this event's computation.
+
+        For a basic event only the expression affects results. Subclasses that
+        carry additional result-affecting parameters extend this so those
+        parameters participate in the definition hash and a redefinition is
+        detected as a change.
+        """
+        return self.get_expression_str()
+
     def determine_definition_hash(self) -> int:
         """
-        Calculate definition hash for basic event.
+        Calculate definition hash for the event.
 
-        Only includes the expression (computation logic), which is the
-        only attribute that affects the event results.
-
-        Excludes: name, description, required_channels, report_id
+        Hashes :meth:`_definition_str` — the expression plus any subclass
+        parameters that affect results. Excludes name, description,
+        required_channels, report_id.
 
         Returns
         -------
         int
             Hash value representing the computation definition.
         """
-        # Only the expression affects results
-        hash_input = self.get_expression_str()
-
         # Use SHA-256 and return as int (truncated to fit LongType)
-        hash_bytes = hashlib.sha256(hash_input.encode()).digest()
+        hash_bytes = hashlib.sha256(self._definition_str().encode()).digest()
         return int.from_bytes(hash_bytes[:8], byteorder="big", signed=True)
 
     def as_dict(self) -> dict:
@@ -206,6 +278,9 @@ class BasicEvent(Event):
                 "event_id",
                 ReportEntityUtil.get_event_id_column(elements=events, element_name="event_name"),
             )
+            # BasicEvent has no per-entity scope; entity_key is NULL for these rows.
+            # EntityEvent overrides the materialization path to populate it.
+            .withColumn("entity_key", f.lit(None).cast("string"))
             .select(EVENT_INSTANCE_FACT_SCHEMA.fieldNames())
             .where(f.col("start_ts") < f.col("end_ts"))  # Ensure valid time intervals
         )

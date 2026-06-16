@@ -209,6 +209,20 @@ class SolverConfig(BaseModel):
         return "value"
 
     @property
+    def container_stop_ts_col(self) -> str:
+        """Internal column name for the container's stop timestamp on the
+        container_metrics table.
+
+        Used by the cross-series cogroup path to close the final frame of a
+        point-in-time series at session end. A deployment whose physical column
+        has a different name maps it to this internal name via
+        ``container_metrics.column_name_mapping`` (same mechanism as every other
+        column). When the column is absent from the resolved metrics frame the
+        last point-in-time frame stays open (collapses to zero length and drops).
+        """
+        return "stop_ts"
+
+    @property
     def tag_key_col(self) -> str:
         """Internal column name for the attribute key on the container_tags (EAV) table."""
         return "key"

@@ -81,22 +81,35 @@ class Intervals:
             if inplace:
                 return self
             return Intervals.empty()
-        equal_idx = list(self.tstarts[1:] <= self.tends[:-1])
-        # special case for the last interval, which could be a point in time (length 0)
+        # Intervals are sorted by start. Close each merged run at the *running
+        # max* end seen in the run, not the last interval's end — otherwise a
+        # contained interval ([300,400) inside [100,500)) truncates the union to
+        # [100,400). Channel RLE never triggers this (ends are non-decreasing),
+        # but per-entity / cross-series unions do.
+        cummax_end = np.maximum.accumulate(self.tends)
+        # A new run begins where an interval starts strictly after the running
+        # max end of everything before it (a real gap). Touching intervals
+        # (start == running max end) still merge.
+        is_run_start = np.concatenate([[True], self.tstarts[1:] > cummax_end[:-1]])
+        # Special case for a trailing point in time (length 0) sitting exactly at
+        # the run end: keep it as its own interval rather than absorbing it
+        # (see test_merge_overlaps3). A plain running-max loop would swallow it.
         if (
             len(self) > 1
             and (self.tstarts[-1] == self.tends[-1])
-            and (self.tends[-2] == self.tends[-1])
+            and (cummax_end[-2] == self.tstarts[-1])
         ):
-            equal_idx[-1] = False
-        tstarts_idx = ~np.array([False] + equal_idx)
-        tends_idx = ~np.array(equal_idx + [False])
+            is_run_start[-1] = True
+        # Run start = first interval of each run; run end = running max end at the
+        # last interval of each run (the index just before the next run start).
+        run_start_pos = np.flatnonzero(is_run_start)
+        run_end_pos = np.append(run_start_pos[1:] - 1, len(self) - 1)
+        new_tstarts = self.tstarts[run_start_pos]
+        new_tends = cummax_end[run_end_pos]
         if not inplace:
-            return Intervals(
-                self.tstarts[tstarts_idx], self.tends[tends_idx], merge_overlaps=False
-            )
-        self.tstarts = self.tstarts[tstarts_idx]
-        self.tends = self.tends[tends_idx]
+            return Intervals(new_tstarts, new_tends, merge_overlaps=False)
+        self.tstarts = new_tstarts
+        self.tends = new_tends
         return self
 
     def merge_intervals(self, d: float) -> Intervals:
