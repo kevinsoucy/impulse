@@ -12,6 +12,8 @@ from pyspark.sql.column import Column
 if TYPE_CHECKING:
     from impulse_query_engine.measurement_db import MeasurementDB
 
+    from .solver_context import SolverBuildContext
+
 from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesSelector,
 )
@@ -34,6 +36,11 @@ class QuerySolver(ABC):
 
     def __init__(self, config: SolverConfig = None):
         self.config = config or SolverConfig()
+
+    @classmethod
+    def from_config(cls, ctx: "SolverBuildContext") -> "QuerySolver":
+        """Build a solver from the common report construction context."""
+        return cls(config=ctx.solver_config)
 
     @staticmethod
     def _apply_column_mapping(df: DataFrame, mapping: dict[str, str]) -> DataFrame:

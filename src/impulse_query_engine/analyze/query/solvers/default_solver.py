@@ -14,6 +14,7 @@ from impulse_query_engine.analyze.metadata.tag_expression import TagExpression
 from impulse_query_engine.model.series.sample_series import SampleSeries
 
 from .query_solver import QuerySolver
+from .registry import register_solver
 from .series_cache import SeriesCache
 from .solver_config import SolverConfig
 from .utils.interval_encoder import IntervalEncoder
@@ -108,6 +109,7 @@ class TimeSeriesCache(SeriesCache):
         return SampleSeries(s[self._ts_col], s[self._te_col], values)
 
 
+@register_solver("DefaultSolver", aliases=("DeltaSolver", "KeyValueStoreSolver"))
 class DefaultSolver(QuerySolver):
     """
     The default query-engine solver.  Adapts to the shape of the silver layer.
@@ -165,6 +167,16 @@ class DefaultSolver(QuerySolver):
         self.interval_encoder: IntervalEncoder = IntervalEncoder(
             timestamp_col_name="timestamp",
             drop_implausible_data_points=self.drop_implausible_data,
+        )
+
+    @classmethod
+    def from_config(cls, ctx):
+        """Build the default solver from a registered-solver context."""
+        return cls(
+            ctx.spark,
+            config=ctx.solver_config,
+            is_raw_data=ctx.is_raw_data,
+            drop_implausible_data=ctx.drop_implausible_data,
         )
 
     # ------------------------------------------------------------------
