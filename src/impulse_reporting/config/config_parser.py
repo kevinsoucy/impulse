@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, field_validator, model_validator
 
 from impulse_query_engine.analyze.query.solvers.solver_config import SolverConfig
+from impulse_query_engine.analyze.query.solvers.registry import resolve_registration
 
 
 def is_valid_table_name(table_name: str) -> str:
@@ -374,11 +375,39 @@ class QueryEngine(BaseModel):
     - RAW channel data must contain 'container_id', 'channel_id', 'timestamp', 'value' columns
     """
 
-    solver: Solvers = Solvers.DEFAULT_SOLVER
+    solver: Solvers | str = Solvers.DEFAULT_SOLVER
     data_type: DataType = DataType.RLE
     drop_implausible_data: bool = False
     solver_config: SolverConfig | None = None
     batch_size: int = 500
+
+    @field_validator("solver", mode="after")
+    @classmethod
+    def _coerce_builtin_solver_enum(cls, value):
+        """Preserve the historical enum type for built-ins; keep custom names as strings."""
+        if isinstance(value, Solvers):
+            return value
+        try:
+            return Solvers(value)
+        except ValueError:
+            return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_solver_config_for_solver(cls, data):
+        """Validate custom solver config with its registered config class."""
+        if not isinstance(data, dict):
+            return data
+        raw_name = data.get("solver", Solvers.DEFAULT_SOLVER)
+        name = raw_name.value if isinstance(raw_name, Solvers) else str(raw_name)
+        try:
+            config_cls = resolve_registration(name).config_cls
+        except KeyError as exc:
+            raise ValueError(str(exc)) from exc
+        raw_config = data.get("solver_config")
+        if isinstance(raw_config, dict):
+            data["solver_config"] = config_cls.model_validate(raw_config)
+        return data
 
     @model_validator(mode="after")
     def validate_drop_implausible_data_requires_raw(self):

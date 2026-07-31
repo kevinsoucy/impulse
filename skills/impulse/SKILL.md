@@ -1,143 +1,79 @@
 ---
 name: impulse
 description: >
-  Entry point for the Impulse framework — the Databricks Labs library for analyzing large-scale
-  time-series measurement data (automotive testing, industrial IoT sensor recordings) on Spark and
-  Delta. Use when the user mentions "Impulse", "TSAL", measurement/sensor/telemetry channels, test
-  drives, or wants to build histograms, event windows, or statistics over time-series recordings and
-  isn't sure where to start. Explains the core concepts (container, channel, event, aggregation),
-  the three usage modes (reporting, ad-hoc analysis, ML), how to set up `spark` + `WorkspaceClient`,
-  and routes to the right sibling skill.
+  Route business-language measurement and telemetry requests through Impulse. Use when a user asks
+  what recordings or signals exist, selects business dimensions, requests time-series statistics,
+  events, histograms, derived signals, reports, or mentions Impulse/TSAL without knowing the source
+  configuration. Prefer a registered source adapter and return native Impulse analysis.
 ---
 
-# Impulse — overview and routing
+# Impulse — intent-first entry point
 
-Impulse analyzes petabyte-scale time-series measurement data on Databricks without requiring Spark
-expertise. You express signals, events, and aggregations in a Python DSL called **TSAL**; a **query
-engine** compiles them to Spark and runs them per recording; **aggregations** produce duration- and
-distance-weighted histograms and event-scoped statistics. It sits between a governed silver layer and
-a gold-layer star schema in Unity Catalog.
+Translate the user's intent into a configured native Impulse `Report`, then route the analysis to
+the specialist skill. Do not ask the user for physical tables, solver mappings, or signal IDs when a
+source adapter is installed.
 
-Impulse is a **pure library** — there is no CLI and no bundle. Everything runs inside a Databricks
-notebook or job.
-
-## Core vocabulary
-
-| Term            | Meaning                                                                                       |
-|-----------------|-----------------------------------------------------------------------------------------------|
-| **Container**   | One measurement recording — e.g. one test drive, one bench run. Identified by `container_id`. |
-| **Channel**     | One sensor signal within a container — e.g. "Engine RPM". Selected by metadata tags, not columns. |
-| **Event**       | A time window of interest, defined by a TSAL condition or spanning the whole recording.       |
-| **Aggregation** | A computation over channel data within event windows — histogram, 2D histogram, or statistics. |
-| **Silver layer**| The input Delta tables Impulse reads (`container_metrics`, `channel_metrics`, `channels`, …).  |
-| **Gold layer**  | The output star schema Impulse writes (fact + dimension tables) for dashboards and apps.       |
-
-## The three usage modes
-
-Pick the mode that matches the user's goal, then open the skill for it.
-
-| Goal                                                                    | Mode            | Skill                  |
-|-------------------------------------------------------------------------|-----------------|------------------------|
-| "Persist results to gold tables for a dashboard / scheduled job"        | **Reporting**   | `impulse-reporting`    |
-| "Explore signals in a notebook, get a DataFrame back, no writes"        | **Ad-hoc**      | `impulse-analyze`      |
-| "Turn recordings into a feature matrix for MLflow / AutoML"             | **ML**          | `impulse-ml`           |
-
-All three build on the same foundation. Whichever mode, you will almost always also need:
-
-- **`impulse-tsal`** — how to select channels and build the signal expressions every mode consumes.
-- **`impulse-config`** — the config dict that points Impulse at your tables.
-- **`impulse-data-model`** — the shape of the input tables and output star schema.
-- **`impulse-events`** and **`impulse-aggregations`** — the building blocks of reporting and ML.
-
-## Setup (every mode)
-
-Impulse needs an active `spark` session (present in Databricks notebooks) and a Databricks SDK
-`WorkspaceClient`. Install the library first:
+## Start with source discovery
 
 ```python
-# Wheel install (Serverless / DBR ML). The local-dev extra adds pydantic, scipy, etc.
-%pip install databricks-impulse[local-dev]
-dbutils.library.restartPython()
+from impulse_reporting.sources import registered_sources, resolve_source
+
+print(registered_sources())
+source = resolve_source()  # configured default, or the only registered source
+dimensions = source.list_dimensions(spark)
 ```
 
-Or, in a Databricks **Git folder** clone of the repo, add its source tree to `sys.path` (what the
-demo notebooks do):
+If several sources are registered and none is default, show their names and ask the user to select
+one. Never guess an import path or scan source files. Importing the deployment's adapter package is
+environment setup, not a recipe to infer from customer data.
+
+## Build the analysis context
+
+1. Show the adapter's dimensions.
+2. For relevant dimensions, call `source.list_dimension_values(...)`; never invent values.
+3. Ask for a selection when the user has not provided one.
+4. Call `source.list_channels(..., container_filters=selection)`; never guess physical names.
+5. Create a sinkless report unless persistence was explicitly requested and a destination exists.
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.join(REPO_ROOT, "src"))  # REPO_ROOT = your cloned impulse folder
+scope = {"plant": ["Berlin"], "line": ["L1", "L2"]}
+available = source.list_channels(spark, container_filters=scope)
+report = source.create_report(
+    spark,
+    name="analysis",
+    container_filters=scope,
+    channels=["temperature", "vibration"],
+    sink=None,
+)
+db = report.get_db()
+solver = report.get_solver()
+temperature = db.query.channel_with_alias(channel_alias="temperature")
 ```
 
-Then construct the workspace client:
+Use `source.resolve_channel_mappings(...)` only for diagnostics. Keep logical-to-physical mapping
+inside the adapter and native alias resolution.
 
-```python
-from databricks.sdk import WorkspaceClient
-ws = WorkspaceClient()   # authenticates from the notebook's Databricks context
-```
+## Route the requested analysis
 
-**Requirement:** Python 3.12+, PySpark 4.0, Delta Lake 4.0. On Databricks Serverless, use
-**Environment Version 2 or higher** — Version 1 ships Python 3.10 and Impulse's first import fails
-with `ImportError: cannot import name 'Self' from 'typing'`.
+| Intent | Skill |
+|---|---|
+| Select/derive signals or define conditions | `impulse-tsal` |
+| Define event windows | `impulse-events` |
+| Histograms or event-scoped statistics | `impulse-aggregations` |
+| Interactive DataFrame, no writes | `impulse-analyze` |
+| Persist a report to an approved destination | `impulse-reporting` |
+| Understand adapter/table responsibilities | `impulse-data-model` |
+| No adapter is installed and tables are known | `impulse-config` |
 
-## Imports come from full module paths
+## Non-negotiable rules
 
-Impulse's `__init__.py` files do not re-export symbols, so import from the full path every time:
+- Prefer the configured source adapter.
+- Reuse its `Report`, `MeasurementDB`, and solver.
+- Never replace its solver with `DefaultSolver(spark)`.
+- Never reconstruct source tables or solver configuration from physical data.
+- Never guess dimension values or physical channel names.
+- Remain sinkless unless persistence is explicit and `sink` is provided.
+- After setup, use ordinary TSAL, events, aggregations, ad-hoc solving, and reporting.
 
-```python
-from impulse_reporting.core.report import Report
-from impulse_reporting.core.page import Page
-from impulse_reporting.events.basic_event import BasicEvent
-from impulse_reporting.aggregations.histogram import HistogramDuration
-```
-
-The two top-level packages are `impulse_query_engine` (TSAL + query engine) and `impulse_reporting`
-(the reporting orchestration layer). Each sibling skill lists the exact import path for the symbols
-it covers.
-
-## Minimal end-to-end example (reporting mode)
-
-```python
-from databricks.sdk import WorkspaceClient
-from impulse_reporting.core.report import Report
-from impulse_reporting.core.page import Page
-from impulse_reporting.events.basic_event import BasicEvent
-from impulse_reporting.aggregations.histogram import HistogramDuration
-
-ws = WorkspaceClient()
-config = {
-    "source": {
-        "container_metrics_table": "my_catalog.silver.container_metrics",
-        "channel_metrics_table": "my_catalog.silver.channel_metrics",
-        "channels_uri": "my_catalog.silver.channels",
-        "channel_tags_table": "my_catalog.silver.channel_tags",
-    },
-    "unity_sink": {"catalog": "my_catalog", "schema": "gold", "table_prefix": "my_report"},
-    "query_engine": {"solver": "DefaultSolver", "data_type": "RLE"},
-}
-
-report = Report(name="my_report", spark=spark, workspace_client=ws, config=config)
-
-eng_rpm = report.get_db().query.channel(channel_name="Engine RPM")      # see impulse-tsal
-high_rpm = BasicEvent(name="high_rpm", expr=eng_rpm > 2000)             # see impulse-events
-report.add_event(high_rpm)
-
-page = Page(page_number=1)                                             # see impulse-aggregations
-page.add_aggregation(HistogramDuration(
-    name="rpm_hist", base_expr=eng_rpm, bins=[0, 2000, 4000, 6000, 8000], event=high_rpm,
-))
-report.add_page(page)
-
-report.determine_report()   # compute
-report.persist_results()    # write the gold star schema
-```
-
-## Where to go next
-
-- Building signal expressions → **`impulse-tsal`**
-- Defining event windows → **`impulse-events`**
-- Histograms / statistics → **`impulse-aggregations`**
-- The full reporting lifecycle and incremental runs → **`impulse-reporting`**
-- Notebook exploration without writes → **`impulse-analyze`**
-- ML feature matrices → **`impulse-ml`**
-- Config fields (filters, solver, sinkless) → **`impulse-config`**
-- Input/output table shapes and ingestion → **`impulse-data-model`**
+Use manual `MeasurementDB` or report configuration only as an advanced fallback when no adapter is
+registered and the user supplies the source contract.

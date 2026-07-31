@@ -10,8 +10,9 @@ from impulse_query_engine.analyze.metadata.time_series_expression import (
     TimeSeriesExpression,
 )
 from impulse_query_engine.analyze.query.query_builder import QueryBuilder
-from impulse_query_engine.analyze.query.solvers.default_solver import DefaultSolver
 from impulse_query_engine.analyze.query.solvers.query_solver import QuerySolver
+from impulse_query_engine.analyze.query.solvers.registry import resolve_registration
+from impulse_query_engine.analyze.query.solvers.solver_context import SolverBuildContext
 from impulse_query_engine.measurement_db import MeasurementDB, MeasurementDBConfig
 from impulse_reporting.aggregations.aggregation_types import AggregationType
 from impulse_reporting.config.config_parser import (
@@ -115,7 +116,8 @@ class Report:
         )
 
         self.solver = Report.create_solver(self.spark, self.config)
-        log_telemetry(self.ws, "solver", self.config.query_engine.solver.name)
+        solver_name = self.config.query_engine.solver
+        log_telemetry(self.ws, "solver", getattr(solver_name, "value", solver_name))
         log_telemetry(self.ws, "data_type", self.config.query_engine.data_type.value)
 
     @property
@@ -312,23 +314,15 @@ class Report:
         ValueError
             If the solver type is unknown.
         """
-        # DELTA_SOLVER and KEY_VALUE_STORE_SOLVER are deprecated aliases retained
-        # for backward compatibility with existing report configs; all three
-        # resolve to the unified DefaultSolver.
-        match config.query_engine.solver:
-            case Solvers.DEFAULT_SOLVER | Solvers.DELTA_SOLVER | Solvers.KEY_VALUE_STORE_SOLVER:
-                return DefaultSolver(
-                    spark,
-                    config=config.query_engine.solver_config,
-                    is_raw_data=config.query_engine.data_type is DataType.RAW,
-                    drop_implausible_data=config.query_engine.drop_implausible_data,
-                )
-            case _:
-                raise ValueError(
-                    f"Unknown query engine solver: {config.query_engine.solver}. "
-                    f"Supported: {Solvers.DEFAULT_SOLVER} (DELTA_SOLVER and "
-                    f"KEY_VALUE_STORE_SOLVER are deprecated aliases)."
-                )
+        qe = config.query_engine
+        name = qe.solver.value if isinstance(qe.solver, Solvers) else str(qe.solver)
+        context = SolverBuildContext(
+            spark=spark,
+            solver_config=qe.solver_config,
+            is_raw_data=qe.data_type is DataType.RAW,
+            drop_implausible_data=qe.drop_implausible_data,
+        )
+        return resolve_registration(name).solver_cls.from_config(context)
 
     def get_sink_config(self) -> SinkConfig:
         """

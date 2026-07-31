@@ -8,14 +8,14 @@ Each skill is a folder with a `SKILL.md` file that documents usage patterns. Sta
 
 | Skill                                                    | What it covers                                                                                                    |
 |----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| [`impulse`](./impulse/SKILL.md)                          | Entry point. Core concepts (container, channel, event, aggregation), the three usage modes, setup, and a decision tree to the other skills. |
+| [`impulse`](./impulse/SKILL.md)                          | Intent-first entry point. Discovers a registered source, dimensions, and logical channels before routing to native Impulse analysis. |
 | [`impulse-tsal`](./impulse-tsal/SKILL.md)                | The Time Series Analytics Language DSL — selecting channels, deriving virtual signals, and the four result types (`SampleSeries`, `Intervals`, `PointsInTime`, `PointsInTimeSeries`). |
-| [`impulse-data-model`](./impulse-data-model/SKILL.md)    | The silver-layer input tables Impulse reads, the gold-layer star schema it writes, landing your own data, and adapting an existing layout via column mappings. |
-| [`impulse-config`](./impulse-config/SKILL.md)            | The `ImpulseConfig` schema — source tables, sink, container filters, solver options, incremental processing, and sinkless mode. |
+| [`impulse-data-model`](./impulse-data-model/SKILL.md)    | Source-adapter/solver responsibilities, logical and physical channel identity, and the standard silver/gold models. |
+| [`impulse-config`](./impulse-config/SKILL.md)            | Adapter-first setup, native dimension filters, sinkless mode, and manual config fallback. |
 | [`impulse-events`](./impulse-events/SKILL.md)            | Defining event windows: `BasicEvent`, `ContainerEvent`, `SequenceOfEvents`, `PointsInTimeEvent`.                   |
 | [`impulse-aggregations`](./impulse-aggregations/SKILL.md)| Computing results over channels: 1D/2D histograms (duration/distance/custom-weight), `StatsAggregator`, `PointValueAggregator`, and pages. |
 | [`impulse-reporting`](./impulse-reporting/SKILL.md)      | The batch pipeline that persists events and aggregations to the gold-layer star schema with `Report` / `Page`, plus incremental runs. |
-| [`impulse-analyze`](./impulse-analyze/SKILL.md)          | Ad-hoc analysis — evaluating TSAL directly through the query engine and returning Spark or pandas DataFrames, no gold-layer write. |
+| [`impulse-analyze`](./impulse-analyze/SKILL.md)          | Sinkless ad-hoc analysis that reuses an adapter-created Report and its solver. |
 | [`impulse-ml`](./impulse-ml/SKILL.md)                    | Extracting event-scoped statistics as a flat feature matrix for MLflow / AutoML.                                  |
 
 ## Install the skills
@@ -67,3 +67,7 @@ Impulse requires Python 3.12 (Serverless Environment Version 2+), PySpark 4.0, a
 ## Scope and guardrails
 
 These skills are scoped to Impulse's public API — the classes and config a user imports and calls. They do not document internal solver stages or private helpers. Every example is self-contained and uses only the framework's public primitives.
+
+When an installed package registers a source adapter, the skills discover business dimensions and
+logical channels through `impulse_reporting.sources`; they do not embed deployment-specific table
+paths or solver configuration.
